@@ -9,6 +9,8 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include<signal.h>
+
 #define CDMA                0x40000000
 #define BRAM                0x43C00000
 #define OCM                 0xFFFC0000
@@ -111,8 +113,38 @@ void set_random_pl_clk(int ind){
     return;
 }
 
+// Handler for SIGINT, caused by
+// Ctrl-C at keyboard
+void handle_sigint_test1(int sig)
+{
+    printf("Caught signal %d\n", sig);
+    //clean the allocations here
+    // unmap the memory locations
+
+    munmap(ocm,65536);
+    munmap(cdma_virtual_address,4096);
+    munmap(BRAM_virtual_address,4096);
+
+    exit(0);
+}
+
+// Handler for SIGINT, caused by
+// Ctrl-C at keyboard
+void handle_sigint_test2(int sig)
+{
+    printf("Caught signal %d\n", sig);
+    // unmap the memory locations
+    munmap(ocm,65536);
+    munmap(cdma_virtual_address,4096);
+    munmap(BRAM_virtual_address,4096);
+
+    exit(0);
+}
+
+
 void test1(){
 
+    signal(SIGINT, handle_sigint_test1);
 	srand(time(0));         // Seed the ramdom number generator        
 	                            		
     initilize();
@@ -143,6 +175,7 @@ void test1(){
 }
 
 void test2(){
+    signal(SIGINT, handle_sigint_test2);
 	srand(time(0));         // Seed the ramdom number generator        
 	                            		
     initilize();
@@ -173,6 +206,7 @@ void test2(){
 }
 
 void test3(){
+
     initialize();
 
 
@@ -275,3 +309,4 @@ int main() {
 
     return 0;
 }
+
