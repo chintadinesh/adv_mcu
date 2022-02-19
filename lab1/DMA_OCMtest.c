@@ -11,8 +11,12 @@
 
 #include<signal.h>
 
-#define CDMA                0x40000000
-#define BRAM                0x43C00000
+//#define CDMA                0x40000000
+#define CDMA                0xB0028000
+
+//#define BRAM                0x43C00000
+#define BRAM                0xA0028000
+
 #define OCM                 0xFFFC0000
 
 #define CDMACR              0x00
@@ -32,6 +36,13 @@
 
 #define BTT                 0x28
 
+#define PL_CTRL_REG        0xFF5E00C0 // we don't need offset
+
+#define PS_CTRL_REG 0xFD1A0020
+
+#define APLL_CTRL_OFFSET 0
+#define APLL_CFG_OFFSET  0x24
+#define APLL_STATUS_OFFSET 0x44
 
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
@@ -39,6 +50,7 @@
 volatile unsigned int *regs, *address ;
 volatile unsigned int target_addr, offset, value, lp_cnt;     
 
+volatile unsigned int apll_ctrl_reg, apll_cfg_reg, pl_ref_ctrl_reg;
 
 	 
 
@@ -97,19 +109,106 @@ void transfer_bram_to_ocm(unsigned int *cdma_virtual_address, int length)
 //---------------------------our test codes----------------------
 uint32_t* cdma_virtual_address;
 uint32_t* BRAM_virtual_address;
+
 int dh;
 uint32_t* ocm;
+
+uint32_t c[1024];
+
 
 float ps_clks[5] = {1499, 1333, 999, 733, 416.6};
 float pl_clks[5] = {300, 250, 187.5, 150, 100};
 
+enum ps_clk_indices {IND_FBDIV, IND_DIV, IND_CP, IND_RES, IND_LFHF,
+                        IND_LOCKDLY, IND_LOCKCNT};
+
+int ps_clk_vals[5][7] = {
+                            //1499
+                        {
+                            45, //        fbdiv = ,
+                            0, //        div = ,
+
+                            3, //        cp = ,
+                            12, //        res = ,
+                            3, //        lfhf = ,
+                            63, //        lockdly = ,
+                            825, //        lockcnt = ,
+                        },
+                                //1333 => 
+                        {
+                            40, //        fbdif = ,
+                            0, //        div = 
+
+                            3, //        cp = ,
+                            12, //        res = ,
+                            3, //        lfhf = ,
+                            63, //        lockdly = ,
+                            925, //        lockcnt = ,
+                        },
+                                //999 => 
+                        {
+                            30, //        
+                            4, //        cp = ,
+                            6, //        res = ,
+                            3, //        lfhf = ,
+                            63, //        lockdly = ,
+                            850, //        lockcnt = ,
+                        },
+                                //733 => 
+                        {
+                            44, //        ,
+                            1, //        div = ,
+
+                            3, //        cp = ,
+                            12, //        res = ,
+                            3, //        lfhf = ,
+                            63, //        lockdly = ,
+                            850, //        lockcnt = ,
+                        },
+                         //       416 = 
+                         {
+                            25, //        , 
+                            1, //        div = ,
+
+
+                            3, //        cp = ,
+                            10, //        res = ,
+                            3, //        lfhf = ,
+                            63, //        lockdly = ,
+                            1000 //        lockcnt = ,
+    }
+}
+
+
+
+float pl_clks[5] = {300, 250, 187.5, 150, 100};
+
+int pl_clk_divs[5] =  {
+        5,
+        6,
+        8,
+        10,
+        15
+    };
+
 void set_random_ps_clk(int ind){
+    /* % sudo dm 0xFD1A0020
+     * 0xfd1a0020 = 0x00014800
+     * 
+     * Default freq:  33.3333MHz * 72 / 2 = 1199 MHz 
+     */
+
+     while (dm 0xfd1a0044 != 0x1) {;}// Pseudo code
 
     return;
 }
 
 void set_random_pl_clk(int ind){
-
+    *pl_ref_ctrl_reg = (1<<24) // bit 24 enables clock
+     | (1<<16) // bit 23:16 is divisor 1
+      | (pl_clk_divs[ind] <<8); // bit 15:0 is clock divisor 0
+      // frequency = 1.5Ghz/divisor0/divisor1
+      // example = 1.5Ghz/6=250MHz
     return;
 }
 
@@ -124,6 +223,7 @@ void handle_sigint_test1(int sig)
     munmap(ocm,65536);
     munmap(cdma_virtual_address,4096);
     munmap(BRAM_virtual_address,4096);
+    munmap(pl_ref_ctrl_reg, 4096);
 
     exit(0);
 }
@@ -209,16 +309,7 @@ void test3(){
 
     initialize();
 
-
-    //generate random data
-    uint32_t c[1024];
-    //uint32_t c_t[20];
-    for(int i = 0; i < 1024; i++){
-        c[i] = rand();
-
-    // set the Onchip memory
-    for(int i=0; i<20; i++)
-        ocm[i] = c[i];
+    fill_ocm_with_random();
     
     // RESET DMA
     // what does it mean to reset DMA
@@ -230,12 +321,11 @@ void test3(){
     // copy the content to bram from ocm
     transfer_bram_to_ocm(cdma_virtual_address, 1024);
 
-
     evaluate();
     return;
 }
 
-void initialize(){
+void initilize(){
     dh = open("/dev/mem", O_RDWR | O_SYNC); // Open /dev/mem which represents the whole physical memory
     cdma_virtual_address = mmap(NULL, 
                                 4096, 
@@ -249,6 +339,22 @@ void initialize(){
                                 MAP_SHARED, 
                                 dh, 
                                 BRAM); // Memory map AXI Lite register block
+
+    pl_ref_ctrl_reg = mmap(NULL,
+                                0x1000,
+                                PROT_READ|PROT_WRITE,
+                                MAP_SHARED, 
+                                dh, 
+                                PL_CTRL_REG );
+
+    apll_ctrl_reg = mmap(NULL,
+                                0x1000,
+                                PROT_READ|PROT_WRITE,
+                                MAP_SHARED, 
+                                dh, 
+                                PS_CTRL_REG );
+
+
     printf("memory allocation\n");
 
     ocm = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
@@ -281,16 +387,21 @@ void evaluate(){
     return;
 }
 
+
+void fill_ocm_with_random(){
+    //uint32_t c_t[20];
+
+    // set the Onchip memory
+    for(int i=0; i<20; i++){
+        c[i] = rand();
+        ocm[i] = c[i];
+    }
+}
+
 int main() {
 
     initilize();
 
-    uint32_t c[20] = {4,6,2,6,3,8,0,4,6,8,3,42,7,8,2,75,2,69,6,1};  // 
-    //uint32_t c_t[20];
-
-    // set the Onchip memory
-    for(int i=0; i<20; i++)
-        ocm[i] = c[i];
     
     // RESET DMA
     // what does it mean to reset DMA
