@@ -12,17 +12,33 @@
 #define CDMA                0x40000000
 #define BRAM                0x43C00000
 #define OCM                 0xFFFC0000
+
 #define CDMACR              0x00
 #define CDMASR              0x04
+
 #define CURDESC_PNTR        0x08
 #define CURDESC_PNTR_MSB    0x0C
+
 #define TAILDESC_PNTR       0x10
 #define TAILDESC_PNTR_MSB   0x14
+
 #define SA                  0x18
 #define SA_MSB              0x1C
+
 #define DA                  0x20
 #define DA_MSB              0x24
+
 #define BTT                 0x28
+
+
+#define MAP_SIZE 4096UL
+#define MAP_MASK (MAP_SIZE - 1)
+
+volatile unsigned int *regs, *address ;
+volatile unsigned int target_addr, offset, value, lp_cnt;     
+
+
+	 
 
 /***************************  DMA SET ************************************
 *   
@@ -66,45 +82,149 @@ void memdump(void* virtual_address, int byte_count) {
     printf("\n");
 }
 
-void transfer(unsigned int *cdma_virtual_address, int length)
+void transfer_bram_to_ocm(unsigned int *cdma_virtual_address, int length)
 {
     dma_set(cdma_virtual_address, DA, BRAM); // Write destination address
     dma_set(cdma_virtual_address, SA, OCM); // Write source address
+
     dma_set(cdma_virtual_address, BTT, length*4);
+
     cdma_sync(cdma_virtual_address);
 }
 
-int main() {
-    int dh = open("/dev/mem", O_RDWR | O_SYNC); // Open /dev/mem which represents the whole physical memory
-    uint32_t* cdma_virtual_address = mmap(NULL, 
-                                          4096, 
-                                          PROT_READ | PROT_WRITE, 
-                                          MAP_SHARED, 
-                                          dh, 
-                                          CDMA); // Memory map AXI Lite register block
-    uint32_t* BRAM_virtual_address = mmap(NULL, 
-                                          4096, 
-                                          PROT_READ | PROT_WRITE, 
-                                          MAP_SHARED, 
-                                          dh, 
-                                          BRAM); // Memory map AXI Lite register block
-    uint32_t c[20] = {4,6,2,6,3,8,0,4,6,8,3,42,7,8,2,75,2,69,6,1};  // 
-    uint32_t c_t[20];
-    printf("memory allocation\n");
-    uint32_t* ocm = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
+//---------------------------our test codes----------------------
+uint32_t* cdma_virtual_address;
+uint32_t* BRAM_virtual_address;
+int dh;
+uint32_t* ocm;
 
+float ps_clks[5] = {1499, 1333, 999, 733, 416.6};
+float pl_clks[5] = {300, 250, 187.5, 150, 100};
+
+void set_random_ps_clk(int ind){
+
+    return;
+}
+
+void set_random_pl_clk(int ind){
+
+    return;
+}
+
+void test1(){
+
+	srand(time(0));         // Seed the ramdom number generator        
+	                            		
+    initilize();
+
+    // RESET DMA
+    // what does it mean to reset DMA
+    dma_set(cdma_virtual_address, CDMACR, 0x04);
+
+    while (1) {
+
+        set_random_ps_clk(rand()%5);
+        set_random_pl_clk(rand()%5);
+
+	    value = rand();                 // Write random data
+        offset = rand() % MAP_MASK;
+        
+        address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
+		*address = value; 			    // perform write command
+	
+        //printf("0x%.8x" , (target_addr + offset));
+	    //printf(" = 0x%.8x\n", *address);// display register value
+	    
+	    //offset  += 4; 					// WORD alligned
+    }
+	  	    
+
+    return;
+}
+
+void test2(){
+	srand(time(0));         // Seed the ramdom number generator        
+	                            		
+    initilize();
+
+    // RESET DMA
+    // what does it mean to reset DMA
+    dma_set(cdma_virtual_address, CDMACR, 0x04);
+
+    while (1) {
+
+        set_random_ps_clk(rand()%5);
+        //set_random_pl_clk(rand()%5);
+
+	    value = rand();                 // Write random data
+        offset = rand() % MAP_MASK;
+        
+        address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
+		*address = value; 			    // perform write command
+	
+        //printf("0x%.8x" , (target_addr + offset));
+	    //printf(" = 0x%.8x\n", *address);// display register value
+	    
+	    //offset  += 4; 					// WORD alligned
+    }
+	  	    
+
+    return;
+}
+
+void test3(){
+    initialize();
+
+
+    //generate random data
+    uint32_t c[1024];
+    //uint32_t c_t[20];
+    for(int i = 0; i < 1024; i++){
+        c[i] = rand();
+
+    // set the Onchip memory
     for(int i=0; i<20; i++)
         ocm[i] = c[i];
     
     // RESET DMA
+    // what does it mean to reset DMA
     dma_set(cdma_virtual_address, CDMACR, 0x04);
-    struct timeval start, end;
 
 //    printf("Source memory block:      "); memdump(virtual_source_address, 32);
 //    printf("Destination memory block: "); memdump(virtual_destination_address, 32);
 
-    transfer(cdma_virtual_address, 20);
+    // copy the content to bram from ocm
+    transfer_bram_to_ocm(cdma_virtual_address, 1024);
 
+
+    evaluate();
+    return;
+}
+
+void initialize(){
+    dh = open("/dev/mem", O_RDWR | O_SYNC); // Open /dev/mem which represents the whole physical memory
+    cdma_virtual_address = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                dh, 
+                                CDMA); // Memory map AXI Lite register block
+    BRAM_virtual_address = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                dh, 
+                                BRAM); // Memory map AXI Lite register block
+    printf("memory allocation\n");
+
+    ocm = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
+
+    return;
+}
+
+void evaluate(){
+
+    //compare the values in bram with expected values 
     for(int i=0; i<20; i++)
     {
         if(BRAM_virtual_address[i] != c[i])
@@ -118,8 +238,40 @@ int main() {
         }
     }
     printf("test passed!!\n");
+
+    // unmap the memory locations
     munmap(ocm,65536);
     munmap(cdma_virtual_address,4096);
     munmap(BRAM_virtual_address,4096);
+
+    return;
+}
+
+int main() {
+
+    initilize();
+
+    uint32_t c[20] = {4,6,2,6,3,8,0,4,6,8,3,42,7,8,2,75,2,69,6,1};  // 
+    //uint32_t c_t[20];
+
+    // set the Onchip memory
+    for(int i=0; i<20; i++)
+        ocm[i] = c[i];
+    
+    // RESET DMA
+    // what does it mean to reset DMA
+    dma_set(cdma_virtual_address, CDMACR, 0x04);
+
+
+    struct timeval start, end;
+
+//    printf("Source memory block:      "); memdump(virtual_source_address, 32);
+//    printf("Destination memory block: "); memdump(virtual_destination_address, 32);
+
+    // copy the content to bram from ocm
+    transfer_bram_to_ocm(cdma_virtual_address, 20);
+
+    evaluate();
+
     return 0;
 }
