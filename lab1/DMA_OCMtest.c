@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,10 +12,15 @@
 
 #include<signal.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 //#define CDMA                0x40000000
-#define CDMA                0xB0028000
+#define CDMA                0xB0000000
 
 //#define BRAM                0x43C00000
+#define BRAM_DMA            0xB0028000
+
 #define BRAM                0xA0028000
 
 #define OCM                 0xFFFC0000
@@ -36,11 +42,11 @@
 
 #define BTT                 0x28
 
-#define PL_CTRL_REG        0xFF5E00C0 // we don't need offset
+#define PL_CTRL_REG        0xFF5E0000
 
-#define PS_CTRL_REG 0xFD1A0020
+#define PS_CTRL_REG 0xFD1A0000
 
-#define APLL_CTRL_OFFSET 0
+#define APLL_CTRL_OFFSET 0x20
 #define APLL_CFG_OFFSET  0x24
 #define APLL_STATUS_OFFSET 0x44
 
@@ -50,7 +56,8 @@
 volatile unsigned int *regs, *address ;
 volatile unsigned int target_addr, offset, value, lp_cnt;     
 
-volatile unsigned int apll_ctrl_reg, apll_cfg_reg, pl_ref_ctrl_reg;
+uint32_t *apll_ctrl_reg, *apll_cfg_reg, *apll_status_reg; 
+uint32_t *pl_ref_ctrl_reg, *ps_ref_ctrl_reg;
 
 	 
 
@@ -98,7 +105,7 @@ void memdump(void* virtual_address, int byte_count) {
 
 void transfer_bram_to_ocm(unsigned int *cdma_virtual_address, int length)
 {
-    dma_set(cdma_virtual_address, DA, BRAM); // Write destination address
+    dma_set(cdma_virtual_address, DA, BRAM_DMA); // Write destination address
     dma_set(cdma_virtual_address, SA, OCM); // Write source address
 
     dma_set(cdma_virtual_address, BTT, length*4);
@@ -177,13 +184,11 @@ int ps_clk_vals[5][7] = {
                             63, //        lockdly = ,
                             1000 //        lockcnt = ,
     }
-}
+};
 
 
 
-float pl_clks[5] = {300, 250, 187.5, 150, 100};
-
-int pl_clk_divs[5] =  {
+int pl_clk_divs[] =  {
         5,
         6,
         8,
@@ -192,23 +197,159 @@ int pl_clk_divs[5] =  {
     };
 
 void set_random_ps_clk(int ind){
-    /* % sudo dm 0xFD1A0020
-     * 0xfd1a0020 = 0x00014800
-     * 
-     * Default freq:  33.3333MHz * 72 / 2 = 1199 MHz 
-     */
+    /* 
+    * % sudo dm 0xFD1A0020
+    * 0xfd1a0020 = 0x00014800
+    * 
+    * Default freq:  33.3333MHz * 72 / 2 = 1199 MHz 
+    */
 
-     while (dm 0xfd1a0044 != 0x1) {;}// Pseudo code
+    /* the seven steps mentioned in the lab
+    * Set APLL_CTRL = 0x0000_2D00: [DIV2] = 0x0, [FBDIV] = 0X2D
+            pm 0xfd1a0020 0x00002D00
+
+    * Program the control data for APLL_CFG using the data in Table 1.
+            Set APLL_CFG[31:25] = 0x3F // LOCK_DLY
+            Set APLL_CFG[22:13] = 0x339 // LOCK_CNT
+            Set APLL_CFG[11:10] = 0x3 // LFHF
+            Set APLL_CFG[8:5] = 0x3 // CP
+            Set APLL_CFG[3:0] = 0x12 // RES
+
+    * Set APLL_CFG[31:0] = 0x7E67_2C6C
+            pm 0xfd1a0024 0x7E672C6C
+
+    * Program the bypass:
+            Set APLL_CTRL[31:0] = 0x0000_2D08h: [BYPASS] = 0x1
+            pm 0xfd1a0020 0x00002D08
+
+    * Assert reset. This is when the new data is captured into the PLL.
+        Set APLL_CTRL[31:0] = 0x0000_2D09h: [BYPASS] = 0x1 & [RESET] = 0x1
+        pm 0xfd1a0020 0x00002D09
+
+    * 5. Deassert reset.
+        Set APLL_CTRL[31:0] = 0x0000_2D08h: [BYPASS] = 0x1 [RESET] = 0x0
+        pm 0xfd1a0020 0x00002D08
+    * 6. Check for LOCK. Wait until: PLL_STATUS [APLL_LOCK] = 0x1
+            while (dm 0xfd1a0044 != 0x1) do wait // Pseudo code
+    * 7. Deassert bypass.
+            Set APLL_CTRL[31:0] = 0x0000_2D00h: [BYPASS] = 0x00
+            pm 0xfd1a0020 0x00002D00
+    */
+
+    apll_ctrl_reg = ps_ref_ctrl_reg + (APLL_CTRL_OFFSET>>2);
+    apll_cfg_reg = ps_ref_ctrl_reg + (APLL_CFG_OFFSET>>2);
+    apll_status_reg = ps_ref_ctrl_reg + (APLL_STATUS_OFFSET>>2);
+
+    /*
+    ps_clk_vals array structure
+    {
+        45, //        fbdiv = ,
+        0, //        div = ,
+
+        3, //        cp = ,
+        12, //        res = ,
+        3, //        lfhf = ,
+        63, //        lockdly = ,
+        825, //        lockcnt = ,
+    },
+    */
+
+    /* step 1
+    * Set APLL_CTRL = 0x0000_2D00: [DIV2] = 0x0, [FBDIV] = 0X2D
+            pm 0xfd1a0020 0x00002D00
+    */
+
+    int* curr_clk_str; 
+    curr_clk_str = &ps_clk_vals[ind][0];
+
+    *apll_ctrl_reg = (curr_clk_str[1] << 16)
+                       | (curr_clk_str[0] << 8);
+                        
+
+
+    /* step 2
+        * Program the control data for APLL_CFG using the data in Table 1.
+                Set APLL_CFG[31:25] = 0x3F // LOCK_DLY
+                Set APLL_CFG[22:13] = 0x339 // LOCK_CNT
+                Set APLL_CFG[11:10] = 0x3 // LFHF
+                Set APLL_CFG[8:5] = 0x3 // CP
+                Set APLL_CFG[3:0] = 0x12 // RES
+
+        * Set APLL_CFG[31:0] = 0x7E67_2C6C
+                pm 0xfd1a0024 0x7E672C6C
+
+        * Program the bypass:
+                Set APLL_CTRL[31:0] = 0x0000_2D08h: [BYPASS] = 0x1
+                pm 0xfd1a0020 0x00002D08
+
+    */
+    
+    *apll_cfg_reg = (curr_clk_str[3] << 25)       // delay
+                     | (curr_clk_str[4] <<13)       // count  
+                     | (curr_clk_str[2] <<10)       //lfhf
+                     | (curr_clk_str[0] <<5 )       // cp
+                     | (curr_clk_str[1] )      ;     // res
+
+    /* Step 3:
+    Program the bypass:
+    Set APLL_CTRL[31:0] = 0x0000_2D08h: [BYPASS] = 0x1
+    pm 0xfd1a0020 0x00002D08
+    */
+
+    *apll_ctrl_reg |= 0x8; 
+
+    /* step 4
+    * Assert reset. This is when the new data is captured into the PLL.
+        Set APLL_CTRL[31:0] = 0x0000_2D09h: [BYPASS] = 0x1 & [RESET] = 0x1
+        pm 0xfd1a0020 0x00002D09
+    */
+
+    *apll_ctrl_reg |= 0x1; 
+
+    /* step 5
+    * 5. Deassert reset.
+        Set APLL_CTRL[31:0] = 0x0000_2D08h: [BYPASS] = 0x1 [RESET] = 0x0
+        pm 0xfd1a0020 0x00002D08
+    */
+
+    *apll_ctrl_reg &= ~0x00000001; 
+
+    /*
+    * 6. Check for LOCK. Wait until: PLL_STATUS [APLL_LOCK] = 0x1
+            while (dm 0xfd1a0044 != 0x1) do wait // Pseudo code
+    */
+
+    while(*apll_status_reg != 1) ;
+
+    /*
+    * 7. Deassert bypass.
+            Set APLL_CTRL[31:0] = 0x0000_2D00h: [BYPASS] = 0x00
+            pm 0xfd1a0020 0x00002D00
+    */
+    
+    *apll_ctrl_reg &= ~0x00000008; 
 
     return;
 }
 
 void set_random_pl_clk(int ind){
-    *pl_ref_ctrl_reg = (1<<24) // bit 24 enables clock
+    int clk = pl_clk_divs[ind] ;
+    //printf("clk = %d" ,clk);
+
+    uint32_t value = (1<<24) // bit 24 enables clock
      | (1<<16) // bit 23:16 is divisor 1
-      | (pl_clk_divs[ind] <<8); // bit 15:0 is clock divisor 0
+      | (clk <<8); // bit 15:0 is clock divisor 0
       // frequency = 1.5Ghz/divisor0/divisor1
       // example = 1.5Ghz/6=250MHz
+
+
+    //printf("0x%.8x" , pl_ref_ctrl_reg);
+    //printf("0x%.8x" , value);
+
+    uint32_t *pl0 = pl_ref_ctrl_reg;
+    pl0 += 0xC0;
+    *pl0 = value;
+    
     return;
 }
 
@@ -216,7 +357,9 @@ void set_random_pl_clk(int ind){
 // Ctrl-C at keyboard
 void handle_sigint_test1(int sig)
 {
+
     printf("Caught signal %d\n", sig);
+    printf("test passed!!\n"); 
     //clean the allocations here
     // unmap the memory locations
 
@@ -237,10 +380,139 @@ void handle_sigint_test2(int sig)
     munmap(ocm,65536);
     munmap(cdma_virtual_address,4096);
     munmap(BRAM_virtual_address,4096);
+    munmap(pl_ref_ctrl_reg, 4096);
 
     exit(0);
 }
 
+
+
+void initilize(){
+
+    dh = open("/dev/mem", O_RDWR | O_SYNC); // Open /dev/mem which represents the whole physical memory
+    
+    if(dh == -1)
+        printf("Error openig the file");
+
+    cdma_virtual_address = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                dh, 
+                                CDMA); // Memory map AXI Lite register block
+
+    //printf("Writing to cdma");
+
+
+    BRAM_virtual_address = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                dh, 
+                                BRAM); // Memory map AXI Lite register block
+
+    pl_ref_ctrl_reg = mmap(NULL,
+                            0x1000,
+                            PROT_READ|PROT_WRITE,
+                            MAP_SHARED, 
+                            dh, 
+                            PL_CTRL_REG );
+
+    if ( pl_ref_ctrl_reg == MAP_FAILED) {
+        fprintf(stderr, "mmap failed: %s\n", strerror(errno));
+        handle_sigint_test1(0); 
+    }
+
+    ps_ref_ctrl_reg = mmap(NULL,
+                                0x1000,
+                                PROT_READ|PROT_WRITE,
+                                MAP_SHARED, 
+                                dh, 
+                                PS_CTRL_REG );
+
+    if ( ps_ref_ctrl_reg == MAP_FAILED) {
+        fprintf(stderr, "mmap failed: %s\n", strerror(errno));
+        handle_sigint_test1(0); 
+    }
+
+
+    //printf("memory allocation\n");
+
+    ocm = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
+
+    return;
+}
+
+int evaluate(unsigned int * mem1, unsigned int * mem2, int size){
+
+    //compare the values in bram with expected values 
+    for(int i=0; i<size; i++)
+    {
+        if(*(mem1 + i) != *(mem2 + i)) {
+            printf("RAM result: %d and c result is %d  element %d\n", 
+                                *(mem1 + i), *(mem2 + i), i);
+
+            printf("test failed!!\n");
+            munmap(ocm,65536);
+            munmap(cdma_virtual_address,4096);
+            munmap(BRAM_virtual_address,4096);
+            return -1;
+        }
+    }
+    //printf("test passed!!\n");
+
+    // unmap the memory locations
+    //munmap(ocm,65536);
+    //munmap(cdma_virtual_address,4096);
+    //munmap(BRAM_virtual_address,4096);
+
+    return 0;
+}
+
+void fill_ocm_with_random(){
+    int flags[1024] ; 
+    int num_filled = 0;
+
+    for(int i = 0; i< 1024 ; i++){
+        flags[i] = 0;
+        ocm[i] =0; //reset ocm
+    }
+
+    while(num_filled < 1024){
+	    value = rand();                 // Write random data
+        offset = (rand() & MAP_MASK) >> 2;
+
+        if(!flags[offset]){
+            ocm[offset] = value;
+            flags[offset] = 1;
+            num_filled++;
+        }
+        
+    }
+
+    return ;
+}
+
+
+void test3(){
+
+    initilize();
+
+    fill_ocm_with_random();
+    
+    // RESET DMA
+    // what does it mean to reset DMA
+    dma_set(cdma_virtual_address, CDMACR, 0x04);
+
+//    printf("Source memory block:      "); memdump(virtual_source_address, 32);
+//    printf("Destination memory block: "); memdump(virtual_destination_address, 32);
+
+    // copy the content to bram from ocm
+    transfer_bram_to_ocm(cdma_virtual_address, 1024);
+
+    //evaluate();
+    return;
+}
 
 void test1(){
 
@@ -254,22 +526,39 @@ void test1(){
     dma_set(cdma_virtual_address, CDMACR, 0x04);
 
     while (1) {
+       
 
-        set_random_ps_clk(rand()%5);
-        set_random_pl_clk(rand()%5);
+        for(int clk1 = 0; clk1 < 5; clk1++){
+            for(int clk2 = 0; clk2 < 5; clk2++){
+                set_random_ps_clk(clk2);
 
-	    value = rand();                 // Write random data
-        offset = rand() % MAP_MASK;
-        
-        address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
-		*address = value; 			    // perform write command
-	
-        //printf("0x%.8x" , (target_addr + offset));
-	    //printf(" = 0x%.8x\n", *address);// display register value
-	    
-	    //offset  += 4; 					// WORD alligned
+                //int pl_clk_rand = rand()%5;
+
+                //printf("Settign pl clock to %d\n", pl_clk_rand);
+                set_random_pl_clk(clk1);
+
+                fill_ocm_with_random();
+
+                //address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
+                for(int offset = 0; offset < 1024; offset ++){
+                    //address = BRAM_virtual_address + ((offset & MAP_MASK) >> 2);
+
+                    address = BRAM_virtual_address + offset;
+                    *address = ocm[offset]; 			    // perform write command
+
+                    //printf("0x%.8x" , (offset));
+                    //printf(" = 0x%.8x\n", *address);// display register value
+                }
+            
+                //printf("0x%.8x" , (target_addr + offset));
+
+                
+                //offset  += 4; 					// WORD alligned
+
+                evaluate(ocm, BRAM_virtual_address, 1024);
+            }
+        }
     }
-	  	    
 
     return;
 }
@@ -285,138 +574,64 @@ void test2(){
     dma_set(cdma_virtual_address, CDMACR, 0x04);
 
     while (1) {
+       
 
-        set_random_ps_clk(rand()%5);
-        //set_random_pl_clk(rand()%5);
+        for(int clk1 = 0; clk1 < 5; clk1++){
+            for(int clk2 = 0; clk2 < 5; clk2++){
+                set_random_ps_clk(clk2);
 
-	    value = rand();                 // Write random data
-        offset = rand() % MAP_MASK;
-        
-        address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
-		*address = value; 			    // perform write command
-	
-        //printf("0x%.8x" , (target_addr + offset));
-	    //printf(" = 0x%.8x\n", *address);// display register value
-	    
-	    //offset  += 4; 					// WORD alligned
-    }
-	  	    
+                //int pl_clk_rand = rand()%5;
 
-    return;
-}
+                //printf("Settign pl clock to %d\n", pl_clk_rand);
+                set_random_pl_clk(clk1);
 
-void test3(){
+                fill_ocm_with_random();
 
-    initialize();
+                //address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
+                for(int offset = 0; offset < 1024; offset ++){
+                    //address = BRAM_virtual_address + ((offset & MAP_MASK) >> 2);
 
-    fill_ocm_with_random();
-    
-    // RESET DMA
-    // what does it mean to reset DMA
-    dma_set(cdma_virtual_address, CDMACR, 0x04);
+                    address = BRAM_virtual_address + offset;
+                    *address = ocm[offset]; 			    // perform write command
 
-//    printf("Source memory block:      "); memdump(virtual_source_address, 32);
-//    printf("Destination memory block: "); memdump(virtual_destination_address, 32);
+                    //printf("0x%.8x" , (offset));
+                    //printf(" = 0x%.8x\n", *address);// display register value
+                }
+            
+                //printf("0x%.8x" , (target_addr + offset));
 
-    // copy the content to bram from ocm
-    transfer_bram_to_ocm(cdma_virtual_address, 1024);
+                
+                //offset  += 4; 					// WORD alligned
 
-    evaluate();
-    return;
-}
-
-void initilize(){
-    dh = open("/dev/mem", O_RDWR | O_SYNC); // Open /dev/mem which represents the whole physical memory
-    cdma_virtual_address = mmap(NULL, 
-                                4096, 
-                                PROT_READ | PROT_WRITE, 
-                                MAP_SHARED, 
-                                dh, 
-                                CDMA); // Memory map AXI Lite register block
-    BRAM_virtual_address = mmap(NULL, 
-                                4096, 
-                                PROT_READ | PROT_WRITE, 
-                                MAP_SHARED, 
-                                dh, 
-                                BRAM); // Memory map AXI Lite register block
-
-    pl_ref_ctrl_reg = mmap(NULL,
-                                0x1000,
-                                PROT_READ|PROT_WRITE,
-                                MAP_SHARED, 
-                                dh, 
-                                PL_CTRL_REG );
-
-    apll_ctrl_reg = mmap(NULL,
-                                0x1000,
-                                PROT_READ|PROT_WRITE,
-                                MAP_SHARED, 
-                                dh, 
-                                PS_CTRL_REG );
-
-
-    printf("memory allocation\n");
-
-    ocm = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
-
-    return;
-}
-
-void evaluate(){
-
-    //compare the values in bram with expected values 
-    for(int i=0; i<20; i++)
-    {
-        if(BRAM_virtual_address[i] != c[i])
-        {
-            printf("RAM result: %d and c result is %d  element %d\n", BRAM_virtual_address[i], c[i], i);
-            printf("test failed!!\n");
-            munmap(ocm,65536);
-            munmap(cdma_virtual_address,4096);
-            munmap(BRAM_virtual_address,4096);
-            return -1;
+                evaluate(ocm, BRAM_virtual_address, 1024);
+            }
         }
     }
-    printf("test passed!!\n");
-
-    // unmap the memory locations
-    munmap(ocm,65536);
-    munmap(cdma_virtual_address,4096);
-    munmap(BRAM_virtual_address,4096);
 
     return;
 }
 
-
-void fill_ocm_with_random(){
-    //uint32_t c_t[20];
-
-    // set the Onchip memory
-    for(int i=0; i<20; i++){
-        c[i] = rand();
-        ocm[i] = c[i];
-    }
-}
 
 int main() {
 
-    initilize();
+    //initilize();
 
     
     // RESET DMA
     // what does it mean to reset DMA
-    dma_set(cdma_virtual_address, CDMACR, 0x04);
+    //dma_set(cdma_virtual_address, CDMACR, 0x04);
 
-
-    struct timeval start, end;
+    //struct timeval start, end;
 
 //    printf("Source memory block:      "); memdump(virtual_source_address, 32);
 //    printf("Destination memory block: "); memdump(virtual_destination_address, 32);
 
     // copy the content to bram from ocm
-    transfer_bram_to_ocm(cdma_virtual_address, 20);
+    //transfer_bram_to_ocm(cdma_virtual_address, 20);
 
-    evaluate();
+    //evaluate();
+
+    test1();
 
     return 0;
 }
