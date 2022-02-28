@@ -18,7 +18,7 @@ module capture_counter(
     output reg capture_complete;
     
 
-    parameter LOAD = 3'b001; // Used to load an offset values
+    parameter LOAD = 32'h1; // Used to load an offset values
 
     parameter RESET = 3'b000;
     parameter COUNT = 3'b010;
@@ -73,6 +73,7 @@ module capture_counter(
                     end
                 (IDLE): begin
                     capture_complete <= 0;
+                    counter <= LOAD;
 
                     if(!timer_enable) begin
                         state <= IDLE;
