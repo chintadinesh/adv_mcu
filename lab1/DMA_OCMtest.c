@@ -67,7 +67,7 @@
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
 
-#define DEBUG 0
+#define DEBUG 3
 
 #if defined(DEBUG) && DEBUG > 0
  #define DEBUG_PRINT(fmt, args...) fprintf(stderr, "DEBUG: %s:%d:%s(): " fmt, \
@@ -301,6 +301,9 @@ void set_random_ps_clk(int ind){
 
     unsigned int* curr_clk_str; 
     curr_clk_str = &ps_clk_vals[ind][0];
+
+    // clear the fpdiv registers before setting
+    *apll_ctrl_reg &= 0xFFFE80FF;
 
     *apll_ctrl_reg = (curr_clk_str[IND_DIV] << 16)
                        | (curr_clk_str[IND_FBDIV] << 8);
@@ -595,7 +598,7 @@ void fill_ocm_with_random(){
 
 
 void test1(){
-    print("%s\n", __func__);
+    printf("%s\n", __func__);
 
 	srand(time(0));         // Seed the ramdom number generator        
     DEBUG_PRINT("Random number set\n");
@@ -609,8 +612,8 @@ void test1(){
        
 
         for(int clk1 = 0; clk1 < 5; clk1++){
-            //DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            //set_random_ps_clk(clk1);
+            DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
+            set_random_ps_clk(clk1);
 
             for(int clk2 = 0; clk2 < 5; clk2++){
 
@@ -641,7 +644,7 @@ void test1(){
 
 void test2(){
 
-    print("%s\n", __func__);
+    printf("%s\n", __func__);
 
 
     while (1) {
@@ -709,7 +712,7 @@ void test3(){
 
 int main() {
 
-    test_number = 3;
+    test_number = 1;
     DEBUG_PRINT("Using test number = %d\n", test_number);
 
     initilize();
