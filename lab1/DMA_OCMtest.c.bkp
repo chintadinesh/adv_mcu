@@ -15,6 +15,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+
+
 //#define CDMA                0x40000000
 #define CDMA                0xB0000000
 
@@ -24,7 +26,7 @@
 #define BRAM                0xA0028000
 
 #define OCM                 0xFFFC0000
-#define OCM_BACK            0xFFFC2000
+#define OCM_BACK            0xFFFC4000
 
 // AAHA: We are not supposed to any random addresses.
 // The below address doesn't mean anything.
@@ -90,6 +92,7 @@ volatile unsigned int *apll_ctrl_reg, *apll_cfg_reg, *apll_status_reg;
 
 // This is the gloal config varaible to which test is currentlty performing
 int test_number = 1;
+
 /***************************  DMA SET ************************************
 *   
 */
@@ -162,7 +165,7 @@ unsigned int* ocm;
 unsigned int* ocm_back;
 
 // temporory array for generating values. Not so significant.
-unsigned int c[1024];
+//unsigned int c[1024];
 
 
 // used while printing. For reference during coding.
@@ -413,10 +416,10 @@ void unmap_regions(){
     DEBUG_PRINT("unmapping memory\n");
 
     DEBUG_PRINT("unmapping OCM\n");
-    munmap(ocm,4096);
+    munmap(ocm,4096*4);
 
     DEBUG_PRINT("unmapping OCM_BACK\n");
-    munmap(ocm_back,4096);
+    munmap(ocm_back,4096*4);
 
     DEBUG_PRINT("unmapping CDMA\n");
     munmap(cdma_virtual_address,4096);
@@ -428,7 +431,7 @@ void unmap_regions(){
     munmap(ps_ref_ctrl_reg,4096);
     
     DEBUG_PRINT("unmapping BRAM ref\n");
-    munmap(BRAM_virtual_address,4096);
+    munmap(BRAM_virtual_address,4096*2);
 
     return;
 }
@@ -474,7 +477,7 @@ void initilize(){
 
 
     BRAM_virtual_address = mmap(NULL, 
-                                4096, 
+                                4096*2, 
                                 PROT_READ | PROT_WRITE, 
                                 MAP_SHARED, 
                                 dh, 
@@ -522,7 +525,7 @@ void initilize(){
 
     //printf("memory allocation\n");
 
-    ocm = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
+    ocm = mmap(NULL, 4096*4, PROT_READ | PROT_WRITE, MAP_SHARED, dh, OCM);
 
     if ( ocm == MAP_FAILED ){
         fprintf(stderr, "mmap failed: %s\n", strerror(errno));
@@ -532,7 +535,7 @@ void initilize(){
         DEBUG_PRINT("OCM mmap successful\n");
     }
 
-    ocm_back = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, dh,
+    ocm_back = mmap(NULL, 4096*4, PROT_READ | PROT_WRITE, MAP_SHARED, dh,
                         OCM_BACK);
 
     if ( ocm_back == MAP_FAILED ){
@@ -574,7 +577,8 @@ int evaluate(unsigned int * mem1,
     return 0;
 }
 
-int flags[1024] ; 
+int flags[4096*4] ; 
+int c[4096*4];
 
 void fill_ocm_with_random(){
     DEBUG_PRINT("Filling arr with random values\n");
@@ -582,14 +586,14 @@ void fill_ocm_with_random(){
     //int flags[1024] ; 
     int num_filled = 0;
 
-    for(int i = 0; i< 1024 ; i++){
+    for(int i = 0; i< 4096*4 ; i++){
         flags[i] = 0;
         ocm[i] =0; //reset ocm
     }
 
-    while(num_filled < 1024){
+    while(num_filled < 4096*4){
 	    value = rand();                 // Write random data
-        offset = (rand() & MAP_MASK) >> 2;
+        offset = (rand() & 0x3FFF) >> 2;
 
         if(!flags[offset]){
             ocm[offset] = value;
@@ -613,6 +617,11 @@ void test1(){
 	srand(time(0));         // Seed the ramdom number generator        
     DEBUG_PRINT("Random number set\n");
 	                            		
+
+    // RESET DMA
+    // what does it mean to reset DMA
+    //dma_set(cdma_virtual_address, CDMACR, 0x04);
+
     while (1) {
 
         if(req_num_loops > 0)
@@ -624,40 +633,34 @@ void test1(){
             exit(0);
         }
 
-        num_loops++;
        
+        num_loops++;
+
         for(int clk1 = 0; clk1 < 5; clk1++){
             DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
             set_random_ps_clk(clk1);
 
             for(int clk2 = 0; clk2 < 5; clk2++){
 
-                int curr_words = req_num_words;
-
                 DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
                 set_random_pl_clk(clk2);
 
-                while(curr_words > 0){
-                    curr_words--;
+                fill_ocm_with_random();
 
-                    value = rand();                 // Write random data
-                    offset = (rand() & MAP_MASK) >> 2;
+                //address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
+                for(int offset = 0; offset < req_num_words; offset++){
+                    //address = BRAM_virtual_address + ((offset & MAP_MASK) >> 2);
 
                     address = BRAM_virtual_address + offset;
-                    *address = value;
+                    *address = ocm[offset]; 			    // perform write command
 
-                    if(*address != value){
-                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
-                        *address, value);
-
-                        DEBUG_PRINT("test failed!!\n");
-                        unmap_regions();
-
-                        exit(0);
-                    }
-                    num_words++;
+                    //DEBUG_PRINT("0x%.8x" , (offset));
+                    //DEBUG_PRINT(" = 0x%.8x\n", *address);// display register value
                 }
+                
+                num_words += req_num_words;
 
+                evaluate(ocm, BRAM_virtual_address, req_num_words);
             }
         }
     }
@@ -672,18 +675,7 @@ void test2(){
     num_loops = 0;
     num_words = 0;
 
-    if(req_num_loops > 0)
-        req_num_loops--;
-    else if(req_num_loops == 0){
-        printf("Test passed: %d loops of %d 32-bit words!!\n", 
-                num_loops, num_words); 
-        unmap_regions();
-        exit(0);
-    }
-
     while (1) {
-
-        num_loops++; 
 
         if(req_num_loops > 0)
             req_num_loops--;
@@ -694,53 +686,36 @@ void test2(){
             exit(0);
         }
 
+        num_loops++; 
 
         dma_set(cdma_virtual_address, CDMACR, 0x04);
 
         for(int clk1 = 0; clk1 < 5; clk1++){
             //DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            set_random_ps_clk(clk1);
+            //set_random_ps_clk(clk1);
 
             for(int clk2 = 0; clk2 < 5; clk2++){
-                set_random_pl_clk(clk2);
 
-                int curr_words = req_num_words;
+                //set_random_pl_clk(clk2);
 
-                DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
-                set_random_pl_clk(clk2);
+                fill_ocm_with_random(ocm);
 
-                while(curr_words > 0){
-                    curr_words--;
+                //transfer(cdma_virtual_address, 1024);
+                transfer_dma(cdma_virtual_address,req_num_words,
+                        OCM, BRAM_DMA);
 
+                // take a backup 
+                for(int i = 0; i < req_num_words; i++)
+                    c[i] = ocm[i];
 
-                    value = rand();                 // Write random data
-                    offset = (rand() & MAP_MASK) >> 2;
+                fill_ocm_with_random(ocm);
+                transfer_dma(cdma_virtual_address,req_num_words,
+                        BRAM_DMA, OCM);
 
-                    address = ocm + offset;
-                    *address = value;
+                num_words += req_num_words;
 
-                    transfer_dma(cdma_virtual_address,
-                            1, OCM + (offset << 2), BRAM_DMA);
-
-                    offset = (rand() & MAP_MASK) >> 2;
-
-                    address = ocm + offset;
-
-                    transfer_dma(cdma_virtual_address,
-                            1, BRAM_DMA, OCM + (offset << 2));
-
-
-                    if(*address != value){
-                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
-                        *address, value);
-
-                        DEBUG_PRINT("test failed!!\n");
-                        unmap_regions();
-
-                        exit(0);
-                    }
-                    num_words++;
-                }
+                if( evaluate(ocm, c, num_words) < 0)
+                    exit(1);
 
             }
         }
@@ -794,13 +769,20 @@ void test3(){
 
 int main(int argc, char *argv[]) {
 
+
     // default test
     test_number = 3;
 
-#if defined(TEST1)
+#ifdef TEST
+
+#if TEST == 1
     test_number = 1;
-#elif defined(TEST2)
+#elif TEST == 2
     test_number = 2;
+#else
+    test_number = 3;
+#endif
+
 #endif
 
     DEBUG_PRINT("Using test number = %d\n", test_number);
