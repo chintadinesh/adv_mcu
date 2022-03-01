@@ -67,7 +67,9 @@
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
 
-#define DEBUG 3
+#ifndef DEBUG
+#define DEBUG 0
+#endif
 
 #if defined(DEBUG) && DEBUG > 0
  #define DEBUG_PRINT(fmt, args...) fprintf(stderr, "DEBUG: %s:%d:%s(): " fmt, \
@@ -91,6 +93,8 @@ int test_number = 1;
 /***************************  DMA SET ************************************
 *   
 */
+
+int num_loops, num_words;
 
 unsigned int dma_set(unsigned int* dma_virtual_address, int offset, unsigned int value) {
     dma_virtual_address[offset>>2] = value;
@@ -433,7 +437,8 @@ void handle_sigint(int sig)
 {
 
     printf("Caught signal %d\n", sig);
-    printf("test passed!!\n"); 
+    printf("Test passed: %d loops of %d 32-bit words!!\n", num_loops,
+            num_words); 
     unmap_regions();
 
     exit(0);
@@ -600,6 +605,9 @@ void fill_ocm_with_random(){
 void test1(){
     printf("%s\n", __func__);
 
+    num_loops = 0;
+    num_words = 0;
+
 	srand(time(0));         // Seed the ramdom number generator        
     DEBUG_PRINT("Random number set\n");
 	                            		
@@ -610,7 +618,7 @@ void test1(){
 
     while (1) {
        
-
+        num_loops++;
         for(int clk1 = 0; clk1 < 5; clk1++){
             DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
             set_random_ps_clk(clk1);
@@ -633,8 +641,9 @@ void test1(){
                     //DEBUG_PRINT(" = 0x%.8x\n", *address);// display register value
                 }
                 
-                evaluate(ocm, BRAM_virtual_address, 1024);
+                num_words += 1024;
 
+                evaluate(ocm, BRAM_virtual_address, 1024);
             }
         }
     }
@@ -646,9 +655,13 @@ void test2(){
 
     printf("%s\n", __func__);
 
+    num_loops = 0;
+    num_words = 0;
 
     while (1) {
-       
+
+        num_loops++; 
+
         dma_set(cdma_virtual_address, CDMACR, 0x04);
 
         for(int clk1 = 0; clk1 < 5; clk1++){
@@ -664,6 +677,8 @@ void test2(){
                 //transfer(cdma_virtual_address, 1024);
                 transfer_dma(cdma_virtual_address,1024,OCM, BRAM_DMA);
 
+                num_words += 1024;
+
                 if( evaluate(ocm, BRAM_virtual_address, 1024) < 0)
                     exit(1);
 
@@ -678,7 +693,12 @@ void test2(){
 void test3(){
 
     printf("%s\n", __func__);
+    num_loops = 0;
+    num_words = 0;
+
     while (1) {
+        num_loops++;
+
         dma_set(cdma_virtual_address, CDMACR, 0x04);
 
         for(int clk1 = 0; clk1 < 5; clk1++){
@@ -700,6 +720,8 @@ void test3(){
 
                 transfer_dma(cdma_virtual_address,1024,BRAM_DMA,OCM_BACK);
 
+                num_words += 1024;
+
                 if( evaluate(ocm, ocm_back, 1024) < 0)
                     exit(1);
             }
@@ -712,7 +734,17 @@ void test3(){
 
 int main() {
 
+    // default test
+    test_number = 3;
+
+#ifndef TEST1
     test_number = 1;
+#elif TEST2
+    test_number = 2;
+#else
+    test_number = 2;
+#endif
+
     DEBUG_PRINT("Using test number = %d\n", test_number);
 
     initilize();
