@@ -96,6 +96,8 @@ int test_number = 1;
 
 int num_loops, num_words;
 
+int req_num_loops, req_num_words;
+
 unsigned int dma_set(unsigned int* dma_virtual_address, int offset, unsigned int value) {
     dma_virtual_address[offset>>2] = value;
 }
@@ -611,39 +613,51 @@ void test1(){
 	srand(time(0));         // Seed the ramdom number generator        
     DEBUG_PRINT("Random number set\n");
 	                            		
-
-    // RESET DMA
-    // what does it mean to reset DMA
-    //dma_set(cdma_virtual_address, CDMACR, 0x04);
-
     while (1) {
-       
+
+        if(req_num_loops > 0)
+            req_num_loops--;
+        else if(req_num_loops == 0){
+            printf("Test passed: %d loops of %d 32-bit words!!\n", 
+                    num_loops, num_words); 
+            unmap_regions();
+            exit(0);
+        }
+
         num_loops++;
+       
         for(int clk1 = 0; clk1 < 5; clk1++){
             DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
             set_random_ps_clk(clk1);
 
             for(int clk2 = 0; clk2 < 5; clk2++){
 
+                int curr_words = req_num_words;
+
                 DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
                 set_random_pl_clk(clk2);
 
-                fill_ocm_with_random();
+                while(curr_words > 0){
+                    curr_words--;
 
-                //address = regs + (((target_addr + offset) & MAP_MASK)>>2);   
-                for(int offset = 0; offset < 1024; offset++){
-                    //address = BRAM_virtual_address + ((offset & MAP_MASK) >> 2);
+                    value = rand();                 // Write random data
+                    offset = (rand() & MAP_MASK) >> 2;
 
                     address = BRAM_virtual_address + offset;
-                    *address = ocm[offset]; 			    // perform write command
+                    *address = value;
 
-                    //DEBUG_PRINT("0x%.8x" , (offset));
-                    //DEBUG_PRINT(" = 0x%.8x\n", *address);// display register value
+                    if(*address != value){
+                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
+                        *address, value);
+
+                        DEBUG_PRINT("test failed!!\n");
+                        unmap_regions();
+
+                        exit(0);
+                    }
+                    num_words++;
                 }
-                
-                num_words += 1024;
 
-                evaluate(ocm, BRAM_virtual_address, 1024);
             }
         }
     }
@@ -658,29 +672,75 @@ void test2(){
     num_loops = 0;
     num_words = 0;
 
+    if(req_num_loops > 0)
+        req_num_loops--;
+    else if(req_num_loops == 0){
+        printf("Test passed: %d loops of %d 32-bit words!!\n", 
+                num_loops, num_words); 
+        unmap_regions();
+        exit(0);
+    }
+
     while (1) {
 
         num_loops++; 
+
+        if(req_num_loops > 0)
+            req_num_loops--;
+        else if(req_num_loops == 0){
+            printf("Test passed: %d loops of %d 32-bit words!!\n", 
+                    num_loops, num_words); 
+            unmap_regions();
+            exit(0);
+        }
+
 
         dma_set(cdma_virtual_address, CDMACR, 0x04);
 
         for(int clk1 = 0; clk1 < 5; clk1++){
             //DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            //set_random_ps_clk(clk1);
+            set_random_ps_clk(clk1);
 
             for(int clk2 = 0; clk2 < 5; clk2++){
+                set_random_pl_clk(clk2);
 
-                //set_random_pl_clk(clk2);
+                int curr_words = req_num_words;
 
-                fill_ocm_with_random(ocm);
+                DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
+                set_random_pl_clk(clk2);
 
-                //transfer(cdma_virtual_address, 1024);
-                transfer_dma(cdma_virtual_address,1024,OCM, BRAM_DMA);
+                while(curr_words > 0){
+                    curr_words--;
 
-                num_words += 1024;
 
-                if( evaluate(ocm, BRAM_virtual_address, 1024) < 0)
-                    exit(1);
+                    value = rand();                 // Write random data
+                    offset = (rand() & MAP_MASK) >> 2;
+
+                    address = ocm + offset;
+                    *address = value;
+
+                    transfer_dma(cdma_virtual_address,
+                            1, OCM + (offset << 2), BRAM_DMA);
+
+                    offset = (rand() & MAP_MASK) >> 2;
+
+                    address = ocm + offset;
+
+                    transfer_dma(cdma_virtual_address,
+                            1, BRAM_DMA, OCM + (offset << 2));
+
+
+                    if(*address != value){
+                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
+                        *address, value);
+
+                        DEBUG_PRINT("test failed!!\n");
+                        unmap_regions();
+
+                        exit(0);
+                    }
+                    num_words++;
+                }
 
             }
         }
@@ -732,24 +792,48 @@ void test3(){
 }
 
 
-int main() {
+int main(int argc, char *argv[]) {
 
     // default test
     test_number = 3;
 
-#ifdef TEST
-
-#if TEST == 1
+#if defined(TEST1)
     test_number = 1;
-#elif TEST == 2
+#elif defined(TEST2)
     test_number = 2;
-#else
-    test_number = 3;
-#endif
-
 #endif
 
     DEBUG_PRINT("Using test number = %d\n", test_number);
+
+    req_num_loops = -1;
+    req_num_words = -1;
+
+    for(int i = 1; i < argc; i++){
+        if(strcmp(argv[i], "--loops") == 0){
+            req_num_loops = atoi(argv[++i]);
+        }
+        else if(strcmp(argv[i], "--words") == 0){
+            req_num_words = atoi(argv[++i]);
+        }
+    } 
+
+    if( argc == 5 ) { 
+        printf("The arguments supplied are: loops = %d, size = %d\n", 
+        req_num_loops, req_num_words);
+    }
+    else if( argc == 3 ) {
+        printf("The arguments supplied are: loops = %d, size = %d\n", 
+        req_num_loops, req_num_words);
+    }
+
+    if(req_num_words == -1){
+        if(test_number == 1){
+            req_num_words = 2048;
+        }
+        else{
+            req_num_words = 4096;
+        }
+    }
 
     initilize();
 
