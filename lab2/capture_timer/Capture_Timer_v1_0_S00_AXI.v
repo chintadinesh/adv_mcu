@@ -86,7 +86,7 @@
 
     wire capture_complete;
     wire [31:0] counter;
-    wire [3:0] state;
+    wire [2:0] state;
     wire reset;
     wire timer_enable;
 
