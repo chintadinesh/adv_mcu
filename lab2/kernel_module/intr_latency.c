@@ -50,15 +50,15 @@
 #define MAP_MASK (MAP_SIZE - 1)
 
 /* ------------------------------------------------------------------------------- 
- * Device path name for the GPIO device
+ * Device path name for the CAPTURE_TIMER device
  */
  
-#define GPIO_DEV_PATH    "/dev/gpio_int"
+#define CAPTURE_TIMER_DEV_PATH    "/dev/captuer_timer"
 
-#define GPIO_DR_NUM     0x0             // Pin Number
-#define GPIO_DR         0xA0030004      // Interrupt register
-#define GPIO_LED_NUM    0x1
-#define GPIO_LED        0xA0030010      // LED register
+#define CAPTURE_TIMER_DR_NUM     0x0             // Pin Number
+#define CAPTURE_TIMER_DR         0xA0030004      // Interrupt register
+#define CAPTURE_TIMER_LED_NUM    0x1
+#define CAPTURE_TIMER_LED        0xA0030010      // LED register
 /* -------------------------------------------------------------------------------
  * Number of interrupt latency measurements to take:
  */
@@ -66,10 +66,10 @@
 #define NUM_MEASUREMENTS    10000
 
 /* -------------------------------------------------------------------------------
- * File descriptor for GPIO device
+ * File descriptor for CAPTURE_TIMER device
  */
 
-int gpio_dev_fd  = -1;
+int capture_timer_dev_fd  = -1;
 
 /* -------------------------------------------------------------------------------
  *      Counter of number of times sigio_signal_handler() has been executed
@@ -96,7 +96,7 @@ unsigned long intr_latency_measurements[NUM_MEASUREMENTS];
  *      Function prototypes
  */
 
-int gpio_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int bit_val);
+int capture_timer_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int bit_val);
 
 unsigned long int_sqrt(unsigned long n);
 
@@ -125,19 +125,22 @@ main(void)
     /* --------------------------------------------------------------------------
      *      Register signal handler for SIGIO signal:
      */
-
-    struct sigaction sig_action; 
-    
-    memset(&sig_action, 0, sizeof sig_action);
-    sig_action.sa_handler = sigio_signal_handler;
+    struct sigaction sig_action;            //initilize sigaction structure
+    memset(&sig_action, 0, sizeof sig_action);  // set it to 0
+    sig_action.sa_handler = sigio_signal_handler;   // associate it with the
+                                                    // required handler
 
     /* --------------------------------------------------------------------------
      *      Block all signals while our signal handler is executing:
      */
-    (void)sigfillset(&sig_action.sa_mask);
+    (void)sigfillset(&sig_action.sa_mask);      // set the mask signals while
+                                                // executing the handler
 
-    rc = sigaction(SIGIO, &sig_action, NULL);
 
+    rc = sigaction(SIGIO, &sig_action, NULL);   // associate the above
+                                                // sigaction to SIGIO
+                                                // interrupts for the current
+                                                // thread
     if (rc == -1) {
         perror("sigaction() failed");
         return -1;
@@ -146,32 +149,26 @@ main(void)
     /* -------------------------------------------------------------------------
      *      Open the device file
      */ 
-        
-    gpio_dev_fd = open(GPIO_DEV_PATH, O_RDWR);
-
-     if(gpio_dev_fd == -1)    {
-        perror("open() of " GPIO_DEV_PATH " failed");
+    capture_timer_dev_fd = open(CAPTURE_TIMER_DEV_PATH, O_RDWR);
+     if(capture_timer_dev_fd == -1)    {
+        perror("open() of " CAPTURE_TIMER_DEV_PATH " failed");
         return -1;
     }    
 
     /* -------------------------------------------------------------------------
-     * Set our process to receive SIGIO signals from the GPIO device:
+     * Set our process to receive SIGIO signals from the CAPTURE_TIMER device:
      */
-     
-    rc = fcntl(gpio_dev_fd, F_SETOWN, getpid());
-    
+    rc = fcntl(capture_timer_dev_fd, F_SETOWN, getpid());
     if (rc == -1) {
         perror("fcntl() SETOWN failed\n");
         return -1;
     } 
 
     /* -------------------------------------------------------------------------
-     * Enable reception of SIGIO signals for the gpio_dev_fd descriptor
+     * Enable reception of SIGIO signals for the capture_timer_dev_fd descriptor
      */
-     
-    int fd_flags = fcntl(gpio_dev_fd, F_GETFL);
-        rc = fcntl(gpio_dev_fd, F_SETFL, fd_flags | O_ASYNC);
-
+    int fd_flags = fcntl(capture_timer_dev_fd, F_GETFL);
+    rc = fcntl(capture_timer_dev_fd, F_SETFL, fd_flags | O_ASYNC);
     if (rc == -1) {
         perror("fcntl() SETFL failed\n");
         return -1;
@@ -180,12 +177,15 @@ main(void)
     /* -------------------------------------------------------------------------
      * Take interrupt latency measurements in a loop:
      */
-
-    rc = gpio_set_pin(GPIO_DR, GPIO_DR_NUM, 0);     // Clear output pin
-   // rc = gpio_set_pin(GPIO_LED, GPIO_LED_NUM, 0);   // Clear the LED
+    
+    /* -------------------------------------------------------------------------
+     * Set this pin to 0 so that it can be asserted in the loop
+     */
+    rc = capture_timer_set_pin(CAPTURE_TIMER_DR, CAPTURE_TIMER_DR_NUM, 0);     // Clear output pin
+   // rc = capture_timer_set_pin(CAPTURE_TIMER_LED, CAPTURE_TIMER_LED_NUM, 0);   // Clear the LED
     if (rc != 0) { 
-        perror("gpio_set_pin() failed");
-    return -1;
+        perror("capture_timer_set_pin() failed");
+        return -1;
     }
 
     sigset_t signal_mask, signal_mask_old, signal_mask_most;
@@ -202,10 +202,16 @@ main(void)
          * a race condition between the SIGIO signal handler and sigsuspend()
          */
          
-        (void)sigfillset(&signal_mask);
-        (void)sigfillset(&signal_mask_most);
-        (void)sigdelset(&signal_mask_most, SIGIO);
-        (void)sigprocmask(SIG_SETMASK,&signal_mask, &signal_mask_old);       
+         
+        (void)sigfillset(&signal_mask); // mask of all signals
+
+        // used while suspending on the SIGIO interrupt
+        (void)sigfillset(&signal_mask_most); // initilize mask with all signals
+        (void)sigdelset(&signal_mask_most, SIGIO); //remove the required
+
+        // set the mask for current thread
+        // the current thread is set to ignore all signals
+        (void)sigprocmask(SIG_SETMASK,&signal_mask, &signal_mask_old);  
         
         /* ---------------------------------------------------------------------
          * Take a start timestamp for interrupt latency measurement
@@ -213,13 +219,12 @@ main(void)
         (void)gettimeofday(&start_timestamp, NULL); 
 
         /* ---------------------------------------------------------------------
-         * Assert GPIO output pin to trigger generation of edge sensitive interrupt:
+         * Assert CAPTURE_TIMER output pin to trigger generation of edge sensitive interrupt:
          */
-
-        rc = gpio_set_pin(GPIO_DR, GPIO_DR_NUM, 1);
-        //rc = gpio_set_pin(GPIO_LED, GPIO_LED_NUM, 1);        
+        rc = capture_timer_set_pin(CAPTURE_TIMER_DR, CAPTURE_TIMER_DR_NUM, 1);
+        //rc = capture_timer_set_pin(CAPTURE_TIMER_LED, CAPTURE_TIMER_LED_NUM, 1);        
         if (rc != 0) { 
-            perror("gpio_set_pin() failed");
+            perror("capture_timer_set_pin() failed");
         return -1;
         }
                 
@@ -233,16 +238,22 @@ main(void)
             /* Confirm we are coming out of suspend mode correcly */
             assert(rc == -1 && errno == EINTR && sigio_signal_processed);
         }   
-              
+        
+        // unblock all the signals 
         (void)sigprocmask(SIG_SETMASK, &signal_mask_old, NULL);
     
+        // make sure that signal_handler was called before this
         assert(sigio_signal_count == i + 1);   // Critical assertion!!
 
-        rc = gpio_set_pin(GPIO_DR, GPIO_DR_NUM, 0);
-        //rc = gpio_set_pin(GPIO_LED, GPIO_LED_NUM, 0);       
+        /* ---------------------------------------------------------------------
+         * unset the pin so that we can set it back again in the next
+         * iteration
+         */
+        rc = capture_timer_set_pin(CAPTURE_TIMER_DR, CAPTURE_TIMER_DR_NUM, 0);
+        //rc = capture_timer_set_pin(CAPTURE_TIMER_LED, CAPTURE_TIMER_LED_NUM, 0);       
         if (rc != 0) { 
-            perror("gpio_set_pin() failed");
-        return -1;
+            perror("capture_timer_set_pin() failed");
+            return -1;
         } 
          
         /* ---------------------------------------------------------------------
@@ -256,12 +267,12 @@ main(void)
         
     }  // End of for loop
     
-    //rc = gpio_set_pin(GPIO_LED, GPIO_LED_NUM, 0); 
+    //rc = capture_timer_set_pin(CAPTURE_TIMER_LED, CAPTURE_TIMER_LED_NUM, 0); 
     /* -------------------------------------------------------------------------
      * Close device file
      */
      
-    (void)close(gpio_dev_fd);
+    (void)close(capture_timer_dev_fd);
 
     /* -------------------------------------------------------------------------
      * Compute interrupt latency stats:
@@ -300,9 +311,7 @@ main(void)
  * SIGIO signal handler
  */
  
-void
-sigio_signal_handler(int signo)
-{
+void sigio_signal_handler(int signo) {
     volatile int rc1;
 
     assert(signo == SIGIO);   // Confirm correct signal #
@@ -328,8 +337,7 @@ sigio_signal_handler(int signo)
 /* -----------------------------------------------------------------------------
  * Compute interrupt latency stats
  */
-void
-compute_interrupt_latency_stats(
+void compute_interrupt_latency_stats(
     unsigned long   *min_latency_p, 
     unsigned long   *max_latency_p, 
     double          *average_latency_p, 
@@ -366,7 +374,7 @@ compute_interrupt_latency_stats(
                     (average * average));
 
                     
-       *average_latency_p = average;
+    *average_latency_p = average;
     *std_deviation_p = std_deviation;
 }
 
@@ -399,12 +407,14 @@ compute_interrupt_latency_stats(
 
 /* -----------------------------------------------------------------------------
 *
-* gpio_set_pin routine: This routine sets and clears a single bit
-* in a GPIO register.
+* capture_timer_set_pin routine: This routine sets and clears a single bit
+* in a CAPTURE_TIMER register.
 *
 */
-
-int gpio_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int bit_val)
+int capture_timer_set_pin(
+    unsigned int target_addr, 
+    unsigned int pin_number, 
+    unsigned int bit_val)
 {
     unsigned int reg_data;
 
@@ -461,13 +471,4 @@ int gpio_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int
 
     munmap(NULL, MAP_SIZE);        
     return 0;
-    
-
-    
 }    
-    
-    
-
-
-
-

@@ -20,5 +20,5 @@ __used
 __attribute__((section(".modinfo"))) =
 "depends=";
 
-MODULE_ALIAS("of:N*T*Cxlnx,Capture-Timer-1.0");
-MODULE_ALIAS("of:N*T*Cxlnx,Capture-Timer-1.0C*");
+MODULE_ALIAS("of:N*T*Cxlnx,cdma_int");
+MODULE_ALIAS("of:N*T*Cxlnx,cdma_intC*");

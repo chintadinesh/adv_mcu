@@ -1815,7 +1815,7 @@
 			xlnx,single-port-bram = <0x1>;
 		};
 
-		Capture_Timer@a0030000 {
+		Capture_Timer@a0029000 {
 			clock-names = "s00_axi_aclk";
 			clocks = <0x3 0x47>;
 			compatible = "xlnx,Capture-Timer-1.0";

@@ -373,23 +373,27 @@
 	begin
 	      // Address decoding for reading registers
 	      case ( axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] )
-	        2'h0   : reg_data_out <= {capture_gate,     
-                                        3'b0,           
-
-                                        capture_complete,   // Flag to indicate that the
+	        2'h0   : reg_data_out <= { timer_enable,   // Timer enable signal
                                         2'b0,               // capture is complete
-                                        timer_enable,   // Timer enable signal
+                                        capture_complete,   // Flag to indicate that the
+                                        3'b0,           
+                                        capture_gate,     
+                                        16'hBEAD, //Debug 
+                                        8'h0              
+                                        };
 
-                                        8'h0,              //Debug 
-                                        16'hBEAD};
-
-	        2'h1   : reg_data_out <= {interrupt_out,
-                                      timer_enable,
-                                      16'hFEED,14'h0};
+	        2'h1   : reg_data_out <= {
+                                        16'hFEED,
+                                        14'h0,
+                                        timer_enable,
+                                        interrupt_out
+                                        };
 	        2'h2   : reg_data_out <= counter;
-	        2'h3   : reg_data_out <= {state,
-                                      1'b0,
-                                      28'h5555_CAB};
+	        2'h3   : reg_data_out <= {
+                                        28'h5555_CAB,
+                                        1'b0,
+                                        state
+                                      };
 	        default : reg_data_out <= 0;
 	      endcase
 	end
