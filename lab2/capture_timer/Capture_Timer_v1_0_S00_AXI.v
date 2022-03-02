@@ -83,6 +83,14 @@
 		input wire  S_AXI_RREADY
 	);
 
+
+    wire capture_complete;
+    wire [31:0] counter;
+    wire [3:0] state;
+    wire reset;
+    wire timer_enable;
+
+
 	// AXI4LITE signals
 	reg [C_S_AXI_ADDR_WIDTH-1 : 0] 	axi_awaddr;
 	reg  	axi_awready;
@@ -373,16 +381,17 @@
 	begin
 	      // Address decoding for reading registers
 	      case ( axi_araddr[ADDR_LSB+OPT_MEM_ADDR_BITS:ADDR_LSB] )
-	        2'h0   : reg_data_out <= { timer_enable,   // Timer enable signal
-                                        2'b0,               // capture is complete
-                                        capture_complete,   // Flag to indicate that the
-                                        3'b0,           
-                                        capture_gate,     
+	        2'h0   : reg_data_out <= {
                                         16'hBEAD, //Debug 
-                                        8'h0              
+                                        8'h0,              
+                                        timer_enable,   // Timer enable signal
+                                        2'b0,               // capture is complete 	        
+                                        capture_complete,     
+                                        3'b0,                      
+                                        capture_gate     
                                         };
 
-	        2'h1   : reg_data_out <= {
+            2'h1   : reg_data_out <= {
                                         16'hFEED,
                                         14'h0,
                                         timer_enable,
@@ -418,12 +427,6 @@
 	end    
 
 	// Add user logic here
-
-    wire capture_complete;
-    wire [31:0] counter;
-    wire [3:0] state;
-    wire reset;
-    wire timer_enable;
 
     assign interrupt_out = slv_reg0[0];
     assign timer_enable = slv_reg0[1];
