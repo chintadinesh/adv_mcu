@@ -15,8 +15,8 @@
 	)
 	(
 		// Users to add ports here
-        output wire interrupt_out;
-        input capture_gate;
+        output wire interrupt_out,
+        input capture_gate,
 
 		// User ports ends
 		// Do not modify the ports beyond this line
@@ -439,7 +439,7 @@
         .clk            (S_AXI_ACLK),
         .reset          (reset),
         .timer_enable   (timer_enable),
-        .capture_gate   (capture_gate);
+        .capture_gate   (capture_gate)
     );
 
 	// User logic ends
@@ -540,4 +540,3 @@ module capture_counter(
         end
 
     endmodule
-
