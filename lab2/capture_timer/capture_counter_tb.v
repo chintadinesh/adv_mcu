@@ -103,6 +103,20 @@ module capture_counter_tb;
         capture_gate = 1'b0;
         $display("time = %3d, counter = %d\n", $time, counter);
 
+        #4
+        $display("time = %3d, counter = %d\n", $time, counter);
+
+        timer_enable = 1'b1;
+        #400
+        capture_gate = 1'b1;
+        #20
+        capture_gate = 1'b0;
+        #4
+        $display("time = %3d, counter = %d\n", $time, counter);
+        timer_enable = 1'b0;
+        #4
+        $display("time = %3d, counter = %d\n", $time, counter);
+
         end
 
 endmodule
