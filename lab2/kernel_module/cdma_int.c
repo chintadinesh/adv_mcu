@@ -203,7 +203,7 @@ struct file_operations proc_fops = {
 };
 
 static const struct of_device_id zynq_cdma_of_match[] = {
-    { .compatible = "xlnx,Capture-Timer-1.0" },
+    { .compatible = "xlnx,cdma_int" },
     { /* end of table */ }
 };    
     

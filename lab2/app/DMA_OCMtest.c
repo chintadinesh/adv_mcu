@@ -102,6 +102,10 @@ int num_loops, num_words;
 
 int req_num_loops, req_num_words;
 
+
+void unmap_regions();
+
+
 unsigned int dma_set(unsigned int* dma_virtual_address, int offset, unsigned int value) {
     dma_virtual_address[offset>>2] = value;
 }
@@ -195,7 +199,8 @@ unsigned int c[1024];
 //float ps_clks[5] = {1499, 1333, 999, 733, 416.6};
 //float pl_clks[5] = {300, 250, 187.5, 150, 100};
 
-#define NO_CLKS
+#define NO_CLKS 3
+
 float ps_clks[NO_CLKS] = {1499, 999, 416.6};
 float pl_clks[NO_CLKS] = {300, 187.5, 100};
 
