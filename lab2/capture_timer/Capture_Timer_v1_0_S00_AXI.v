@@ -421,12 +421,12 @@
     wire reset;
     wire timer_enable;
 
-    //assign interrupt_out = slv_reg0[0];
+    assign interrupt_out = slv_reg0[0];
     assign timer_enable = slv_reg0[1];
 
     assign reset = ~S_AXI_ARESETN;
 
-    assign interrupt_out = capture_complete;
+    //assign interrupt_out = capture_complete;
 
     capture_counter capture_counter_i(
         .counter        (counter),
