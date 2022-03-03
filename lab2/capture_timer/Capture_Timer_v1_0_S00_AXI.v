@@ -428,8 +428,8 @@
 
 	// Add user logic here
 
-    assign interrupt_out = slv_reg0[0];
-    assign timer_enable = slv_reg0[1];
+    assign interrupt_out = slv_reg1[0];
+    assign timer_enable = slv_reg1[1];
 
     assign reset = ~S_AXI_ARESETN;
 
