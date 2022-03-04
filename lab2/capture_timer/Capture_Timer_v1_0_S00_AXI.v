@@ -515,6 +515,7 @@ module capture_counter(
                             counter <= counter + 1;
                             state <= COUNT;
                             end
+                        end
                     end
                 (WAIT): begin
                     capture_complete <= 1;
@@ -534,6 +535,7 @@ module capture_counter(
                         end
                     else begin
                         state <= COUNT;
+                        counter <= LOAD;
                         end
                     end
                 default: begin
