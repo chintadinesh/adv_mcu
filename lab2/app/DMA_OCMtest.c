@@ -71,6 +71,10 @@
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
 
+
+#define GPIO_DEV_PATH    "/dev/gpio_int"
+
+
 #ifndef DEBUG
 #define DEBUG 0
 #endif
@@ -92,6 +96,10 @@ unsigned int *pl_ref_ctrl_reg, *ps_ref_ctrl_reg;
 // virtual address for ps clk ctrl, cfg and status regs
 volatile unsigned int *apll_ctrl_reg, *apll_cfg_reg, *apll_status_reg; 
 
+
+volatile int rc;
+
+
 // This is the gloal config varaible to which test is currentlty performing
 int test_number = 1;
 /***************************  DMA SET ************************************
@@ -104,6 +112,13 @@ int req_num_loops, req_num_words;
 
 
 void unmap_regions();
+
+
+/* -------------------------------------------------------------------------------
+ * File descriptor for GPIO device
+ */
+
+int gpio_dev_fd  = -1;
 
 
 unsigned int dma_set(unsigned int* dma_virtual_address, int offset, unsigned int value) {
@@ -147,19 +162,22 @@ void memdump(void* virtual_address, int byte_count) {
 void transfer_dma(unsigned int *cdma_virtual_address, int length,
         unsigned int src_address, unsigned int dst_address)
 {
-    dma_set(cdma_virtual_address, SA, src_address); // Write source address
-    dma_set(cdma_virtual_address, DA, dst_address); // Write destination address
-
-    dma_set(cdma_virtual_address, BTT, length*4);
-
     int status;
 
     pid_t child_pid = fork();
     if(child_pid >=0){
 
         if(child_pid == 0){
-            printf("Child started\n");
-            sleep(10);
+            //printf("Child started\n");
+            // Write source address
+            dma_set(cdma_virtual_address, SA, src_address);
+
+            // Write destination address
+            dma_set(cdma_virtual_address, DA, dst_address); 
+
+            dma_set(cdma_virtual_address, BTT, length*4);
+
+            exit(0);
         }
         else{
             waitpid(child_pid, &status, WCONTINUED);
@@ -469,6 +487,10 @@ void unmap_regions(){
     DEBUG_PRINT("unmapping BRAM ref\n");
     munmap(BRAM_virtual_address,4096);
 
+
+    //DEBUG_PRINT("closing %s\n", GPIO_DEV_PATH);
+    //(void)close(gpio_dev_fd);
+
     return;
 }
 
@@ -582,6 +604,44 @@ void initilize(){
         DEBUG_PRINT("OCM_BACK mmap successful\n");
     }
 
+
+//    DEBUG_PRINT("Opening %s\n", GPIO_DEV_PATH);
+//
+//    /* -------------------------------------------------------------------------
+//     *      Open the device file
+//     */ 
+//        
+//    gpio_dev_fd = open(GPIO_DEV_PATH, O_RDWR);
+//
+//     if(gpio_dev_fd == -1)    {
+//        perror("open() of " GPIO_DEV_PATH " failed");
+//        return;
+//    }    
+//
+//
+//    /* -------------------------------------------------------------------------
+//     * Set our process to receive SIGIO signals from the GPIO device:
+//     */
+//     
+//    rc = fcntl(gpio_dev_fd, F_SETOWN, getpid());
+//    
+//    if (rc == -1) {
+//        perror("fcntl() SETOWN failed\n");
+//        return;
+//    } 
+//
+//    /* -------------------------------------------------------------------------
+//     * Enable reception of SIGIO signals for the gpio_dev_fd descriptor
+//     */
+//     
+//    int fd_flags = fcntl(gpio_dev_fd, F_GETFL);
+//        rc = fcntl(gpio_dev_fd, F_SETFL, fd_flags | O_ASYNC);
+//
+//    if (rc == -1) {
+//        perror("fcntl() SETFL failed\n");
+//        return ;
+//    } 
+    
     return;
 }
 
