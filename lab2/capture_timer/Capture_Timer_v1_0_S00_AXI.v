@@ -502,16 +502,19 @@ module capture_counter(
                         end
                     end
                 (COUNT): begin
-                    if(!capture_gate) begin
-                        counter <= counter + 1;
-                        state <= COUNT;
-                        end
-                    else if(capture_gate) begin
+                    capture_complete <= 0;
+
+                    if(capture_gate) begin
                         state <= WAIT;
                         end
-                    else if(!timer_enable) begin
-                        state <= WAIT;
-                        end
+                    else begin
+                        if(!timer_enable) begin
+                            state <= WAIT;
+                            end
+                        else begin
+                            counter <= counter + 1;
+                            state <= COUNT;
+                            end
                     end
                 (WAIT): begin
                     capture_complete <= 1;
@@ -524,7 +527,7 @@ module capture_counter(
                         end
                     end
                 (IDLE): begin
-                    capture_complete <= 0;
+                    //capture_complete <= 1;
 
                     if(!timer_enable) begin
                         state <= IDLE;
