@@ -1,5 +1,5 @@
 /* ===================================================================
- *  gpio-interrupt.c
+ *  cdma-interrupt.c
  *
  *  AUTHOR:     Mark McDermott
  *  CREATED:    March 12, 2009
@@ -54,35 +54,35 @@ int             len             = 0;
 char            *msg            = NULL;
 unsigned int    gic_interrupt;
 
-static struct fasync_struct *fasync_gpio_queue ;
+static struct fasync_struct *fasync_cdma_queue ;
 
 /* ===================================================================
- * function: gpio_int_handler
+ * function: cdma_int_handler
  *
- * This function is the gpio_interrupt handler. It sets the tv2
+ * This function is the cdma_interrupt handler. It sets the tv2
  * structure using do_gettimeofday.
  */
  
-//static irqreturn_t gpio_int_handler(int irq, void *dev_id, struct pt_regs *regs)
+//static irqreturn_t cdma_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 
-irq_handler_t gpio_int_handler(int irq, void *dev_id, struct pt_regs *regs)
+irq_handler_t cdma_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 {
   interruptcount++;
   
     #ifdef DEBUG
-    printk(KERN_INFO "gpio_int: Interrupt detected in kernel \n");  // DEBUG
+    printk(KERN_INFO "cdma_int: Interrupt detected in kernel \n");  // DEBUG
     #endif
   
     /* Signal the user application that an interupt occured */
   
-    kill_fasync(&fasync_gpio_queue, SIGIO, POLL_IN);
+    kill_fasync(&fasync_cdma_queue, SIGIO, POLL_IN);
 
 return  (irq_handler_t) IRQ_HANDLED;
 
 }
 
 
-static struct proc_dir_entry *proc_gpio_int;
+static struct proc_dir_entry *proc_cdma_int;
 
 /* ===================================================================
 *    function: read_proc   --- Example code
@@ -124,38 +124,38 @@ return count;
 
 
 /* ===================================================================
- * function: gpio_open
+ * function: cdma_open
  *
- * This function is called when the gpio_int device is opened
+ * This function is called when the cdma_int device is opened
  *
  */
  
-static int gpio_open (struct inode *inode, struct file *file) {
+static int cdma_open (struct inode *inode, struct file *file) {
 
 #ifdef DEBUG
-        printk(KERN_INFO "gpio_int: Inside gpio_open \n");  // DEBUG
+        printk(KERN_INFO "cdma_int: Inside cdma_open \n");  // DEBUG
 #endif
     return 0;
 }
 
 /* ===================================================================
- * function: gpio_release
+ * function: cdma_release
  *
- * This function is called when the gpio_int device is
+ * This function is called when the cdma_int device is
  * released
  *
  */
  
-static int gpio_release (struct inode *inode, struct file *file) {
+static int cdma_release (struct inode *inode, struct file *file) {
 
 #ifdef DEBUG
-        printk(KERN_INFO "\ngpio_int: Inside gpio_release \n");  // DEBUG
+        printk(KERN_INFO "\ncdma_int: Inside cdma_release \n");  // DEBUG
 #endif
     return 0;
 }
 
 /* ===================================================================
- * function: gpio_fasync
+ * function: cdma_fasync
  *
  * This is invoked by the kernel when the user program opens this
  * input device and issues fcntl(F_SETFL) on the associated file
@@ -163,13 +163,13 @@ static int gpio_release (struct inode *inode, struct file *file) {
  * kill_fasync(), a SIGIO is dispatched to the owning application.
  */
 
-static int gpio_fasync (int fd, struct file *filp, int on)
+static int cdma_fasync (int fd, struct file *filp, int on)
 {
     #ifdef DEBUG
-    printk(KERN_INFO "\ngpio_int: Inside gpio_fasync \n");  // DEBUG
+    printk(KERN_INFO "\ncdma_int: Inside cdma_fasync \n");  // DEBUG
     #endif
     
-    return fasync_helper(fd, filp, on, &fasync_gpio_queue);
+    return fasync_helper(fd, filp, on, &fasync_cdma_queue);
 }; 
 
 /* ===================================================================
@@ -178,7 +178,7 @@ static int gpio_fasync (int fd, struct file *filp, int on)
 *
 */
 
-struct file_operations gpio_fops = {
+struct file_operations cdma_fops = {
     .owner          =    THIS_MODULE,
     .llseek         =    NULL,
     .read           =    NULL,
@@ -186,11 +186,11 @@ struct file_operations gpio_fops = {
     .poll           =    NULL,
     .unlocked_ioctl =    NULL,
     .mmap           =    NULL,
-    .open           =    gpio_open,
+    .open           =    cdma_open,
     .flush          =    NULL,
-    .release        =    gpio_release,
+    .release        =    cdma_release,
     .fsync          =    NULL,
-    .fasync         =    gpio_fasync,
+    .fasync         =    cdma_fasync,
     .lock           =    NULL,
     .read           =    NULL,
     .write          =    NULL,
@@ -201,22 +201,22 @@ struct file_operations proc_fops = {
     write: write_proc
 };
 
-static const struct of_device_id zynq_gpio_of_match[] = {
+static const struct of_device_id zynq_cdma_of_match[] = {
     { .compatible = "xlnx,cdma_int" },
     { /* end of table */ }
 };    
     
-MODULE_DEVICE_TABLE(of, zynq_gpio_of_match);
+MODULE_DEVICE_TABLE(of, zynq_cdma_of_match);
 
 
 /* ===================================================================
  *
- * zynq_gpio_probe - Initialization method for a zynq_gpio device
+ * zynq_cdma_probe - Initialization method for a zynq_cdma device
  *
  * Return: 0 on success, negative error otherwise.
  */
 
-static int zynq_gpio_probe(struct platform_device *pdev)
+static int zynq_cdma_probe(struct platform_device *pdev)
 {
     struct resource *res;
         
@@ -242,78 +242,78 @@ static int zynq_gpio_probe(struct platform_device *pdev)
 
 /* ===================================================================
  *
- * zynq_gpio_remove - Driver removal function
+ * zynq_cdma_remove - Driver removal function
  *
  * Return: 0 always
  */
  
-static int zynq_gpio_remove(struct platform_device *pdev)
+static int zynq_cdma_remove(struct platform_device *pdev)
 {
-    //struct zynq_gpio *gpio = platform_get_drvdata(pdev)
+    //struct zynq_cdma *cdma = platform_get_drvdata(pdev)
 
     return 0;
 }
 
 
-static struct platform_driver zynq_gpio_driver = {
+static struct platform_driver zynq_cdma_driver = {
     .driver    = {
         .name = MODULE_NM,
-        .of_match_table = zynq_gpio_of_match,
+        .of_match_table = zynq_cdma_of_match,
     },
-    .probe = zynq_gpio_probe,
-    .remove = zynq_gpio_remove,
+    .probe = zynq_cdma_probe,
+    .remove = zynq_cdma_remove,
 };
 
 
 /* ===================================================================
- * function: init_gpio_int
+ * function: init_cdma_int
  *
- * This function creates the /proc directory entry gpio_interrupt.
+ * This function creates the /proc directory entry cdma_interrupt.
  */
  
-static int __init init_gpio_int(void)
+static int __init init_cdma_int(void)
 {
 
     int rv = 0;
     int err = 0;
     
-    //platform_driver_unregister(&zynq_gpio_driver);
+    //platform_driver_unregister(&zynq_cdma_driver);
     
    
     printk("ZED Interrupt Module\n");
     printk("ZED Interrupt Driver Loading.\n");
     printk("Using Major Number %d on %s\n", GPIO_MAJOR, MODULE_NM); 
 
-    err = platform_driver_register(&zynq_gpio_driver);
+    err = platform_driver_register(&zynq_cdma_driver);
       
     if(err !=0) printk("Driver register error with number %d\n",err);       
     else        printk("Driver registered with no error\n");
     
-    if (register_chrdev(GPIO_MAJOR, MODULE_NM, &gpio_fops)) {
-        printk("gpio_int: unable to get major %d. ABORTING!\n", GPIO_MAJOR);
-    goto no_gpio_interrupt;
+    if (register_chrdev(GPIO_MAJOR, MODULE_NM, &cdma_fops)) {
+        printk("cdma_int: unable to get major %d. ABORTING!\n", GPIO_MAJOR);
+    goto no_cdma_interrupt;
     }
 
-    proc_gpio_int = proc_create("gpio_interrupt", 0444, NULL, &proc_fops );
+    proc_cdma_int = proc_create("cdma_interrupt", 0444, NULL, &proc_fops );
     msg=kmalloc(GFP_KERNEL,10*sizeof(char));
     
-    if(proc_gpio_int == NULL) {
-          printk("gpio_int: create /proc entry returned NULL. ABORTING!\n");
-    goto no_gpio_interrupt;
+    if(proc_cdma_int == NULL) {
+          printk("cdma_int: create /proc entry returned NULL. ABORTING!\n");
+    goto no_cdma_interrupt;
     }
 
     // Request interrupt
     
-    // rv = request_irq(gic_interrupt, gpio_int_handler, IRQF_TRIGGER_RISING,
+    // rv = request_irq(gic_interrupt, cdma_int_handler, IRQF_TRIGGER_RISING,
     rv = request_irq(gic_interrupt, 
-                    (irq_handler_t) gpio_int_handler, 
+                    (irq_handler_t) cdma_int_handler, 
                      IRQF_TRIGGER_RISING,
-                    "gpio_interrupt", NULL);
+                    "cdma_interrupt", NULL);
   
     if ( rv ) {
        // printk("Can't get interrupt %d\n", INTERRUPT);
         printk("Can't get interrupt %d\n", gic_interrupt);
-    goto no_gpio_interrupt;
+    goto no_cdma_interrupt;
     }
 
     printk(KERN_INFO "%s %s Initialized\n",MODULE_NM, MODULE_VER);
@@ -322,29 +322,29 @@ static int __init init_gpio_int(void)
 
     // remove the proc entry on error
     
-no_gpio_interrupt:
+no_cdma_interrupt:
     free_irq(gic_interrupt,NULL);                   // Release IRQ    
     unregister_chrdev(GPIO_MAJOR, MODULE_NM);       // Release character device
     unregister_chrdev(GPIO_MAJOR, MODULE_NM);
-    platform_driver_unregister(&zynq_gpio_driver);
-    remove_proc_entry("gpio_interrupt", NULL);
+    platform_driver_unregister(&zynq_cdma_driver);
+    remove_proc_entry("cdma_interrupt", NULL);
     return -EBUSY;
 };
 
 /* ===================================================================
- * function: cleanup_gpio_interrupt
+ * function: cleanup_cdma_interrupt
  *
  * This function frees interrupt then removes the /proc directory entry 
- * gpio_interrupt. 
+ * cdma_interrupt. 
  */
  
-static void __exit cleanup_gpio_interrupt(void)
+static void __exit cleanup_cdma_interrupt(void)
 {
 
     free_irq(gic_interrupt,NULL);                   // Release IRQ    
     unregister_chrdev(GPIO_MAJOR, MODULE_NM);       // Release character device
-    platform_driver_unregister(&zynq_gpio_driver);  // Unregister the driver
-    remove_proc_entry("gpio_interrupt", NULL);      // Remove process entry
+    platform_driver_unregister(&zynq_cdma_driver);  // Unregister the driver
+    remove_proc_entry("cdma_interrupt", NULL);      // Remove process entry
     kfree(msg);
     printk(KERN_INFO "%s %s removed\n", MODULE_NM, MODULE_VER);
      
@@ -358,10 +358,10 @@ static void __exit cleanup_gpio_interrupt(void)
  */
 
 
-module_init(init_gpio_int);
-module_exit(cleanup_gpio_interrupt);
+module_init(init_cdma_int);
+module_exit(cleanup_cdma_interrupt);
 
 MODULE_AUTHOR("Mark McDermott");
-MODULE_DESCRIPTION("gpio_interrupt proc module");
+MODULE_DESCRIPTION("cdma_interrupt proc module");
 MODULE_LICENSE("GPL");
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 
 rm /dev/cdma_int
-/bin/mknod /dev/cdma_int c 240 0
+/bin/mknod /dev/cdma_int c 245 0
 
 /sbin/rmmod cdma_int
 /sbin/insmod cdma_int.ko

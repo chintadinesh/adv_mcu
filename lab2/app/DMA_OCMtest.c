@@ -19,6 +19,20 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+
+#include <assert.h>
+#include <errno.h>
+#include <limits.h>
+#include <linux/errno.h>
+#include <linux/fs.h>
+#include <linux/sched.h>
+#include <linux/types.h>
+#include <linux/version.h>
+#include <math.h>    
+#include <signal.h>
+#include <sys/ioctl.h>
+
+
 //#define CDMA                0x40000000
 #define CDMA                0xB0000000
 
@@ -29,6 +43,8 @@
 
 #define OCM                 0xFFFC0000
 #define OCM_BACK            0xFFFC2000
+
+#define CAPTURE_TIMER       0xA0030000
 
 // AAHA: We are not supposed to any random addresses.
 // The below address doesn't mean anything.
@@ -56,6 +72,10 @@
 
 #define BTT                 0x28
 
+#define CDMA_ENBL_INT       0x1000
+
+#define CDMA_DSBL_INT       0x0000
+
 // PL clock physicl address for mmap
 #define PL_CTRL_REG        0xFF5E0000
 
@@ -67,12 +87,28 @@
 #define APLL_CFG_OFFSET  0x24
 #define APLL_STATUS_OFFSET 0x44
 
+
+// capture timer offset for registers
+#define CPT_SLV0    0x0
+#define CPT_SLV1    0x4
+#define CPT_SLV2    0x8
+#define CPT_SLV3    0xc
+
 // useful page size and masks, while doing mmap
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
 
 
-#define GPIO_DEV_PATH    "/dev/gpio_int"
+//#define GPIO_DEV_PATH    "/dev/gpio_int"
+#define CDMA_DEV_PATH    "/dev/cdma_int"
+
+#undef MONITOR
+#define MONITOR
+
+#undef MONITOR_DUMP
+#define MONITOR_DUMP
+
+#define NUM_MEASUREMENTS    10000
 
 
 #ifndef DEBUG
@@ -89,6 +125,8 @@
 // not sure. Icommented the code 
 volatile unsigned int *regs, *address ;
 volatile unsigned int target_addr, offset, value, lp_cnt;     
+
+volatile unsigned int *capture_counter_base;
 
 // virtual address for pl and ps regions
 unsigned int *pl_ref_ctrl_reg, *ps_ref_ctrl_reg;
@@ -107,8 +145,11 @@ int test_number = 1;
 */
 
 int num_loops, num_words;
+int total_number_of_samples = 0;
 
-int req_num_loops, req_num_words;
+int ps_freq_ind, pl_freq_ind;
+int req_num_loops;
+
 
 
 void unmap_regions();
@@ -118,8 +159,49 @@ void unmap_regions();
  * File descriptor for GPIO device
  */
 
-int gpio_dev_fd  = -1;
+int cdma_dev_fd  = -1;
 
+/* -------------------------------------------------------------------------------
+ *      Counter of number of times sigio_signal_handler() has been executed
+ */
+volatile int sigio_signal_count = 0;
+
+/* -------------------------------------------------------------------------------
+ * Controlling signals for interrupt handler
+ */
+struct sigaction sig_action; 
+
+/* -------------------------------------------------------------------------------
+ *      Flag to indicate that a SIGIO signal has been processed
+ */
+static volatile sig_atomic_t sigio_signal_processed = 0;
+ 
+
+/* -------------------------------------------------------------------------------
+ * Controlling signals between kernel and process 
+ */
+sigset_t signal_mask, signal_mask_old, signal_mask_most;
+
+
+volatile unsigned  long capture_counter;
+
+
+/* -------------------------------------------------------------------------------
+ *      Array of dma latency measurements (in clk ticks):
+ */
+unsigned long cdma_ocm_to_bram_measurements[NUM_MEASUREMENTS];
+unsigned long cdma_bram_to_ocm_measurements[NUM_MEASUREMENTS];
+
+
+void get_capture_counter();
+void capture_counter_timer_enable();
+void capture_counter_timer_disable();
+
+void compute_and_print_stats();
+void dump_stats();
+
+void sigio_signal_handler(int signo);
+unsigned long int_sqrt(unsigned long n);
 
 unsigned int dma_set(unsigned int* dma_virtual_address, int offset, unsigned int value) {
     dma_virtual_address[offset>>2] = value;
@@ -160,27 +242,90 @@ void memdump(void* virtual_address, int byte_count) {
 }
 
 void transfer_dma(unsigned int *cdma_virtual_address, int length,
-        unsigned int src_address, unsigned int dst_address)
-{
+        unsigned int src_address, unsigned int dst_address) {
     int status;
+
+
+    // reset dma
+    *(cdma_virtual_address + (CDMACR >> 2)) = 0x4;
+
+    /* ---------------------------------------------------------------------
+        * Reset sigio_signal_processed flag:
+        */
+    sigio_signal_processed = 0; 
+
+    /* ---------------------------------------------------------------------
+        * NOTE: This next section of code must be excuted each cycle to prevent
+        * a race condition between the SIGIO signal handler and sigsuspend()
+        */
+        
+    (void)sigfillset(&signal_mask);
+    (void)sigdelset(&signal_mask, SIGIO);
+    (void)sigdelset(&signal_mask, SIGINT);
+    (void)sigdelset(&signal_mask, SIGTERM);
+
+    (void)sigfillset(&signal_mask_most);
+    (void)sigdelset(&signal_mask_most, SIGIO);
+    (void)sigdelset(&signal_mask_most, SIGINT);
+    (void)sigdelset(&signal_mask_most, SIGTERM);
+
+    (void)sigprocmask(SIG_SETMASK,&signal_mask, &signal_mask_old);       
+        
 
     pid_t child_pid = fork();
     if(child_pid >=0){
 
         if(child_pid == 0){
-            //printf("Child started\n");
+
+            DEBUG_PRINT("Child started\n");
             // Write source address
+
+#ifdef MONITOR
+            DEBUG_PRINT("Enabling timer\n");
+            capture_counter_timer_enable();
+#endif
             dma_set(cdma_virtual_address, SA, src_address);
 
             // Write destination address
             dma_set(cdma_virtual_address, DA, dst_address); 
 
+            
+            //pm(CDMA+CDMACR, 0x1000); // Enable interrupts
+            *(cdma_virtual_address + (CDMACR >> 2)) = 0x1000;
+
+
             dma_set(cdma_virtual_address, BTT, length*4);
 
-            exit(0);
-        }
-        else{
-            waitpid(child_pid, &status, WCONTINUED);
+              exit(0);
+          }
+          else{
+              waitpid(child_pid, &status, WCONTINUED);
+
+                //rc = sigsuspend(&signal_mask_most);
+                /*
+                * Wait for SIGIO signal handler to be executed. 
+                */
+                if (sigio_signal_processed == 0) { 
+
+                    rc = sigsuspend(&signal_mask_most);
+                    
+                    /* Confirm we are coming out of suspend mode correcly */
+                    assert(rc == -1 && errno == EINTR && sigio_signal_processed);
+                }   
+            
+                //usgin a busy wait
+                //while(sigio_signal_count == 0);
+                    
+                (void)sigprocmask(SIG_SETMASK, &signal_mask_old, NULL);
+            
+                //assert(sigio_signal_count == i + 1);   // Critical assertion!!
+
+                DEBUG_PRINT("Parent woken up\n");
+                //while (!sigio_signal_processed);   // busy wait loop
+                                    // wait for the handler to set the varaiable
+                sigio_signal_processed = 0; 
+
+
         }
 
         //cdma_sync(cdma_virtual_address);
@@ -193,6 +338,7 @@ void transfer_dma(unsigned int *cdma_virtual_address, int length,
         exit(0);
 
     } // end if childpid >=0
+
 }
 
 //---------------------------our test codes----------------------
@@ -488,8 +634,8 @@ void unmap_regions(){
     munmap(BRAM_virtual_address,4096);
 
 
-    //DEBUG_PRINT("closing %s\n", GPIO_DEV_PATH);
-    //(void)close(gpio_dev_fd);
+    DEBUG_PRINT("closing %s\n", CDMA_DEV_PATH);
+    (void)close(cdma_dev_fd);
 
     return;
 }
@@ -605,42 +751,77 @@ void initilize(){
     }
 
 
-//    DEBUG_PRINT("Opening %s\n", GPIO_DEV_PATH);
-//
-//    /* -------------------------------------------------------------------------
-//     *      Open the device file
-//     */ 
-//        
-//    gpio_dev_fd = open(GPIO_DEV_PATH, O_RDWR);
-//
-//     if(gpio_dev_fd == -1)    {
-//        perror("open() of " GPIO_DEV_PATH " failed");
-//        return;
-//    }    
-//
-//
-//    /* -------------------------------------------------------------------------
-//     * Set our process to receive SIGIO signals from the GPIO device:
-//     */
-//     
-//    rc = fcntl(gpio_dev_fd, F_SETOWN, getpid());
-//    
-//    if (rc == -1) {
-//        perror("fcntl() SETOWN failed\n");
-//        return;
-//    } 
-//
-//    /* -------------------------------------------------------------------------
-//     * Enable reception of SIGIO signals for the gpio_dev_fd descriptor
-//     */
-//     
-//    int fd_flags = fcntl(gpio_dev_fd, F_GETFL);
-//        rc = fcntl(gpio_dev_fd, F_SETFL, fd_flags | O_ASYNC);
-//
-//    if (rc == -1) {
-//        perror("fcntl() SETFL failed\n");
-//        return ;
-//    } 
+#ifdef MONITOR
+    capture_counter_base = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                dh, 
+                                CAPTURE_TIMER);
+
+    if ( capture_counter_base == MAP_FAILED ){
+        fprintf(stderr, "mmap failed: %s\n", strerror(errno));
+        handle_sigint(0); 
+    }
+    else {
+        DEBUG_PRINT("CAPTURE_COUNTER mmap successful\n");
+    }
+#endif
+
+    //************************ Initilize signal related variables
+    
+    memset(&sig_action, 0, sizeof sig_action);
+    sig_action.sa_handler = sigio_signal_handler;
+
+    /* --------------------------------------------------------------------------
+     *      Block all signals while our signal handler is executing:
+     */
+    (void)sigfillset(&sig_action.sa_mask);
+
+    rc = sigaction(SIGIO, &sig_action, NULL);
+
+    if (rc == -1) {
+        perror("sigaction() failed");
+        //return -1;
+        return ;
+    }
+
+    DEBUG_PRINT("Opening %s\n", CDMA_DEV_PATH);
+
+    /* -------------------------------------------------------------------------
+     *      Open the device file
+     */ 
+        
+    cdma_dev_fd = open(CDMA_DEV_PATH, O_RDWR);
+
+     if(cdma_dev_fd == -1)    {
+        perror("open() of " CDMA_DEV_PATH " failed");
+        return;
+    }    
+
+
+    /* -------------------------------------------------------------------------
+     * Set our process to receive SIGIO signals from the GPIO device:
+     */
+     
+    rc = fcntl(cdma_dev_fd, F_SETOWN, getpid());
+    
+    if (rc == -1) {
+        perror("fcntl() SETOWN failed\n");
+        return;
+    } 
+
+    /* -------------------------------------------------------------------------
+     * Enable reception of SIGIO signals for the cdma_dev_fd descriptor
+     */
+     
+    int fd_flags = fcntl(cdma_dev_fd, F_GETFL);
+        rc = fcntl(cdma_dev_fd, F_SETFL, fd_flags | O_ASYNC);
+
+    if (rc == -1) {
+        perror("fcntl() SETFL failed\n");
+        return ;
+    } 
     
     return;
 }
@@ -704,188 +885,59 @@ void fill_ocm_with_random(){
 
 
 void test1(){
-    printf("%s\n", __func__);
-
-    num_loops = 0;
-    num_words = 0;
-
-	srand(time(0));         // Seed the ramdom number generator        
-    DEBUG_PRINT("Random number set\n");
-	                            		
-    while (1) {
-
-        if(req_num_loops > 0)
-            req_num_loops--;
-        else if(req_num_loops == 0){
-            printf("Test passed: %d loops of %d 32-bit words!!\n", 
-                    num_loops, num_words); 
-            unmap_regions();
-            exit(0);
-        }
-
-        num_loops++;
-       
-        for(int clk1 = 0; clk1 < NO_CLKS; clk1++){
-            DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            set_random_ps_clk(clk1);
-
-            for(int clk2 = 0; clk2 < NO_CLKS; clk2++){
-
-                int curr_words = req_num_words;
-
-                DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
-                set_random_pl_clk(clk2);
-
-                while(curr_words > 0){
-                    curr_words--;
-
-                    value = rand();                 // Write random data
-                    offset = (rand() & MAP_MASK) >> 2;
-
-                    address = BRAM_virtual_address + offset;
-                    *address = value;
-
-                    if(*address != value){
-                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
-                        *address, value);
-
-                        DEBUG_PRINT("test failed!!\n");
-                        unmap_regions();
-
-                        exit(0);
-                    }
-                    num_words++;
-                }
-
-            }
-        }
-    }
-
-    return;
-}
-
-void test2(){
-
-    printf("%s\n", __func__);
-
-    num_loops = 0;
-    num_words = 0;
-
-    if(req_num_loops > 0)
-        req_num_loops--;
-    else if(req_num_loops == 0){
-        printf("Test passed: %d loops of %d 32-bit words!!\n", 
-                num_loops, num_words); 
-        unmap_regions();
-        exit(0);
-    }
-
-    while (1) {
-
-        num_loops++; 
-
-        if(req_num_loops > 0)
-            req_num_loops--;
-        else if(req_num_loops == 0){
-            printf("Test passed: %d loops of %d 32-bit words!!\n", 
-                    num_loops, num_words); 
-            unmap_regions();
-            exit(0);
-        }
-
-
-        dma_set(cdma_virtual_address, CDMACR, 0x04);
-
-        for(int clk1 = 0; clk1 < NO_CLKS; clk1++){
-            //DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            set_random_ps_clk(clk1);
-
-            for(int clk2 = 0; clk2 < NO_CLKS; clk2++){
-                set_random_pl_clk(clk2);
-
-                int curr_words = req_num_words;
-
-                DEBUG_PRINT("Setting PL clock freq = %f\n", pl_clks[clk2]);
-                set_random_pl_clk(clk2);
-
-                while(curr_words > 0){
-                    curr_words--;
-
-
-                    value = rand();                 // Write random data
-                    offset = (rand() & MAP_MASK) >> 2;
-
-                    address = ocm + offset;
-                    *address = value;
-
-                    transfer_dma(cdma_virtual_address,
-                            1, OCM + (offset << 2), BRAM_DMA);
-
-                    offset = (rand() & MAP_MASK) >> 2;
-
-                    address = ocm + offset;
-
-                    transfer_dma(cdma_virtual_address,
-                            1, BRAM_DMA, OCM + (offset << 2));
-
-
-                    if(*address != value){
-                        DEBUG_PRINT("RAM result: 0x%.8x and expected 0x%.8x\n", 
-                        *address, value);
-
-                        DEBUG_PRINT("test failed!!\n");
-                        unmap_regions();
-
-                        exit(0);
-                    }
-                    num_words++;
-                }
-
-            }
-        }
-    }
-
-    return;
-
-}
-
-void test3(){
 
     printf("%s\n", __func__);
     num_loops = 0;
     num_words = 0;
 
-    while (1) {
+
+    printf("Config: loops = %d, ps_freq = %f, pl_freq = %f\n", 
+        req_num_loops, ps_clks[ps_freq_ind], pl_clks[pl_freq_ind]);
+    
+    set_random_ps_clk(ps_freq_ind);
+    set_random_pl_clk(pl_freq_ind);
+
+    while ( num_loops < req_num_loops) {
         num_loops++;
 
-        dma_set(cdma_virtual_address, CDMACR, 0x04);
+        fill_ocm_with_random();
 
-        for(int clk1 = 0; clk1 < NO_CLKS; clk1++){
-            //DEBUG_PRINT("Setting PS clock freq = %f\n", ps_clks[clk1]);
-            set_random_ps_clk(clk1);
 
-            for(int clk2 = 0; clk2 < NO_CLKS; clk2++){
-                //set_random_ps_clk(clk2);
+        transfer_dma(cdma_virtual_address,1024,OCM, BRAM_DMA);
 
-                set_random_pl_clk(clk2);
+        /* ---------------------------------------------------------------------
+        * Compute dma latency:
+        */
+        cdma_ocm_to_bram_measurements[num_loops-1] = capture_counter;
 
-                fill_ocm_with_random();
+        total_number_of_samples++;
 
-                //dma_set(cdma_virtual_address, CDMACR, 0x04);
+        //dma_set(cdma_virtual_address, CDMACR, 0x04);
 
-                transfer_dma(cdma_virtual_address,1024,OCM, BRAM_DMA);
+        transfer_dma(cdma_virtual_address,1024,BRAM_DMA,OCM_BACK);
 
-                //dma_set(cdma_virtual_address, CDMACR, 0x04);
+        /* ---------------------------------------------------------------------
+        * Compute dma latency:
+        */
+        cdma_bram_to_ocm_measurements[num_loops-1] = capture_counter;
 
-                transfer_dma(cdma_virtual_address,1024,BRAM_DMA,OCM_BACK);
+        total_number_of_samples++;
 
-                num_words += 1024;
+        num_words += 1024;
 
-                if( evaluate(ocm, ocm_back, 1024) < 0)
-                    exit(1);
-            }
-        }
+        if( evaluate(ocm, ocm_back, 1024) < 0)
+            exit(1);
     }
+
+    DEBUG_PRINT("Completed transfers: num_loops= %d\n", num_loops);
+
+#ifdef MONITOR
+    compute_and_print_stats();
+#ifdef MONITOR_DUMP
+    dump_stats();
+#endif
+
+#endif
 
     return;
 }
@@ -894,54 +946,279 @@ void test3(){
 int main(int argc, char *argv[]) {
 
     // default test
-    test_number = 3;
-
-#if defined(TEST1)
     test_number = 1;
-#elif defined(TEST2)
-    test_number = 2;
-#endif
 
     DEBUG_PRINT("Using test number = %d\n", test_number);
 
-    req_num_loops = -1;
-    req_num_words = -1;
+    req_num_loops = 5000;
+    ps_freq_ind = 0;
+    pl_freq_ind = 0;
 
     for(int i = 1; i < argc; i++){
         if(strcmp(argv[i], "--loops") == 0){
             req_num_loops = atoi(argv[++i]);
         }
-        else if(strcmp(argv[i], "--words") == 0){
-            req_num_words = atoi(argv[++i]);
+        else if(strcmp(argv[i], "--ps_freq") == 0){
+            ps_freq_ind = atoi(argv[++i]);
+        }
+        else if(strcmp(argv[i], "--pl_freq") == 0){
+            pl_freq_ind = atoi(argv[++i]);
         }
     } 
 
-    if( argc == 5 ) { 
-        printf("The arguments supplied are: loops = %d, size = %d\n", 
-        req_num_loops, req_num_words);
-    }
-    else if( argc == 3 ) {
-        printf("The arguments supplied are: loops = %d, size = %d\n", 
-        req_num_loops, req_num_words);
-    }
-
-    if(req_num_words == -1){
-        if(test_number == 1){
-            req_num_words = 2048;
-        }
-        else{
-            req_num_words = 4096;
-        }
-    }
 
     initilize();
 
     signal(SIGINT, handle_sigint);
 	srand(time(0));         // Seed the ramdom number generator        
-	//srand(0);         // Seed the ramdom number generator        
 	                            		
-    test3();
+    test1();
 
     return 0;
 }
 
+/* -----------------------------------------------------------------------------
+ * SIGIO signal handler
+ */
+ 
+void sigio_signal_handler(int signo)
+{
+    volatile int rc1;
+
+    assert(signo == SIGIO);   // Confirm correct signal #
+    sigio_signal_count++;
+
+    //printf("sigio_signal_handler called (signo=%d)\n", signo);
+
+    // acknowledge itnerrupt
+    //dma_set(cdma_virtual_address, CDMACR, CDMA_DSBL_INT);
+    //*(cdma_virtual_address + (CDMACR >> 2)) &= 0xFFFFEFFF;
+    *(cdma_virtual_address + (CDMACR >> 2)) = 0;
+
+#ifdef MONITOR
+    DEBUG_PRINT("loop: %d, just before reading counter = %lu\n", num_loops,
+            capture_counter);
+    get_capture_counter();
+    DEBUG_PRINT("loop: %d, after reading counter = %lu\n", num_loops,
+            capture_counter);
+    capture_counter_timer_disable();
+#endif
+
+    /* -------------------------------------------------------------------------
+     * Set global flag
+     */
+     
+    sigio_signal_processed = 1; 
+    
+    /* -------------------------------------------------------------------------
+     * Take end timestamp for interrupt latency measurement
+     */
+    //(void)gettimeofday(&sigio_signal_timestamp, NULL); 
+
+}
+
+
+/* -----------------------------------------------------------------------------
+ * read the capture counter
+ */
+void get_capture_counter()
+{
+
+    capture_counter = *(capture_counter_base + (CPT_SLV2 >> 2));
+
+    return;
+}
+
+/* -----------------------------------------------------------------------------
+ * unset the timer enable
+ */
+void capture_counter_timer_disable()
+{
+
+    *(capture_counter_base + (CPT_SLV1 >> 2))
+            =  0;
+
+    return;
+}
+
+/* -----------------------------------------------------------------------------
+ * set the timer enable
+ */
+void capture_counter_timer_enable()
+{
+
+    *(capture_counter_base + (CPT_SLV1 >> 2)) = (0x2);
+
+    return;
+}
+
+/* -----------------------------------------------------------------------------
+ * Compute interrupt latency stats
+ */
+void
+compute_interrupt_latency_stats(
+    unsigned long intr_latency_measurements[],
+    unsigned long   *min_latency_p, 
+    unsigned long   *max_latency_p, 
+    double          *average_latency_p, 
+    double          *std_deviation_p)
+{
+    int i;
+    unsigned long   val;
+    unsigned long   min = ULONG_MAX;
+    unsigned long   max = 0;
+    unsigned long   sum = 0;
+    unsigned long   sum_squares = 0;
+
+    for (i = 0; i < req_num_loops; i ++) {
+        val = intr_latency_measurements[i];
+
+        if (val < min) {
+            min = val;
+        } 
+        
+        if (val > max) {
+            max = val;
+        }
+
+        sum += val;
+        sum_squares += val * val;
+    }
+
+    *min_latency_p = min;
+    *max_latency_p = max;
+
+    unsigned long average = (unsigned long)sum / req_num_loops;
+
+    unsigned long std_deviation = int_sqrt((sum_squares / req_num_loops) -
+                    (average * average));
+
+                    
+    *average_latency_p = average;
+    *std_deviation_p = std_deviation;
+}
+
+/* ---------------------------------------------------------------
+* sqrt routine
+*/
+
+ unsigned long int_sqrt(unsigned long n)
+{
+   unsigned long root = 0;
+   unsigned long bit;
+   unsigned long trial;
+   
+   bit = (n >= 0x10000) ? 1<<30 : 1<<14;
+   do
+   {
+      trial = root+bit;
+      if (n >= trial)
+      {
+         n -= trial;
+         root = trial+bit;
+      }
+      root >>= 1;
+      bit >>= 2;
+   } while (bit);
+   return root;
+}
+
+void create_marks_csv( long unsigned a[],
+                            int end_id,
+                            int start_id,
+                            FILE* fp){
+
+
+    int i,j;
+
+
+    for(i=start_id;i<end_id;i++){
+        fprintf(fp,"\n%d, %lu",i+1, a[i-start_id]);
+
+    }
+}
+
+void dump_stats() {
+    char filename[32]; 
+
+    sprintf(filename, "%s_%d_%d_%d", 
+                        "cdma_latency", 
+                        num_loops, ps_freq_ind, pl_freq_ind); 
+
+    strcat(filename,".csv");
+
+    DEBUG_PRINT("\n Creating %s file",filename);
+
+    FILE* fp=fopen(filename,"w+");
+
+    fprintf(fp,"Id, Latency");
+
+    create_marks_csv( cdma_ocm_to_bram_measurements,
+                            num_loops,
+                            0,
+                            fp);
+
+    create_marks_csv( cdma_bram_to_ocm_measurements,
+                            2*num_loops,
+                            num_loops,
+                            fp);
+
+    fclose(fp);
+
+    DEBUG_PRINT("\n %sfile created\n",filename);
+
+}
+
+void compute_and_print_stats()
+{
+    unsigned long   min_latency; 
+    unsigned long   max_latency; 
+    double          average_latency; 
+    double          std_deviation; 
+     
+    printf("********* OCM to BRAM stats *********\n");
+    compute_interrupt_latency_stats(
+                        cdma_ocm_to_bram_measurements,
+                        &min_latency, 
+                        &max_latency,
+                        &average_latency, 
+                        &std_deviation);
+
+    /*
+     * Print interrupt latency stats:
+     */
+    printf("Minimum Latency:    %lu\n" 
+           "Maximum Latency:    %lu\n" 
+           "Average Latency:    %f\n" 
+           "Standard Deviation: %f\n"
+           "Number of samples:  %d\n",
+            min_latency, 
+            max_latency, 
+            average_latency, 
+            std_deviation,
+            num_loops);
+
+    printf("********* BRAM to OCM stats *********\n");
+    compute_interrupt_latency_stats(
+                        cdma_bram_to_ocm_measurements,
+                        &min_latency, 
+                        &max_latency,
+                        &average_latency, 
+                        &std_deviation);
+
+    /*
+     * Print interrupt latency stats:
+     */
+    printf("Minimum Latency:    %lu\n" 
+           "Maximum Latency:    %lu\n" 
+           "Average Latency:    %f\n" 
+           "Standard Deviation: %f\n"
+           "Number of samples:  %d\n",
+            min_latency, 
+            max_latency, 
+            average_latency, 
+            std_deviation,
+            num_loops);
+
+    printf("Total number of samples = %d\n", total_number_of_samples);
+}
