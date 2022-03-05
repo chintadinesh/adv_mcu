@@ -34,10 +34,11 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
-#undef DEBUG
-#define DEBUG
-
-
+// capture timer offset for registers
+#define CPT_SLV0    0x0
+#define CPT_SLV1    0x4
+#define CPT_SLV2    0x8
+#define CPT_SLV3    0xc
 
 /* -------------------------------------------------------------------------------  
  * One-bit masks for bits 0-31
@@ -55,15 +56,35 @@
  
 #define GPIO_DEV_PATH    "/dev/gpio_int"
 
-#define GPIO_DR_NUM     0x0             // Pin Number
+#define GPIO_DR_NUM     0x1             // Pin Number
 #define GPIO_DR         0xA0030004      // Interrupt register
 #define GPIO_LED_NUM    0x1
 #define GPIO_LED        0xA0030010      // LED register
+
+#define CAPTURE_TIMER       0xA0030000
+
+#undef DEBUG
+
+#ifndef DEBUG
+#define DEBUG 0
+#endif
+
+#if defined(DEBUG) && DEBUG > 0
+ #define DEBUG_PRINT(fmt, args...) fprintf(stderr, "DEBUG: %s:%d:%s(): " fmt, \
+    __FILE__, __LINE__, __func__, ##args)
+#else
+ #define DEBUG_PRINT(fmt, args...) /* Don't do anything in release builds */
+#endif
+
+
+
 /* -------------------------------------------------------------------------------
  * Number of interrupt latency measurements to take:
  */
  
 #define NUM_MEASUREMENTS    10000
+
+volatile unsigned long capture_counter;
 
 /* -------------------------------------------------------------------------------
  * File descriptor for GPIO device
@@ -108,6 +129,10 @@ void compute_interrupt_latency_stats(
     double          *average_latency_p, 
     double          *std_deviation_p); 
 
+
+void get_capture_counter();
+
+void dump_stats();
 
 /* -------------------------------------------------------------------------------
  * Main routine
@@ -233,6 +258,7 @@ main(void)
             /* Confirm we are coming out of suspend mode correcly */
             assert(rc == -1 && errno == EINTR && sigio_signal_processed);
         }   
+
               
         (void)sigprocmask(SIG_SETMASK, &signal_mask_old, NULL);
     
@@ -242,19 +268,24 @@ main(void)
         //rc = gpio_set_pin(GPIO_LED, GPIO_LED_NUM, 0);       
         if (rc != 0) { 
             perror("gpio_set_pin() failed");
-        return -1;
+            return -1;
         } 
 
         get_capture_counter();
+
          
+        intr_latency_measurements[i] = capture_counter;
+        
         /* ---------------------------------------------------------------------
          * Compute interrupt latency:
          */
+         /*
         intr_latency_measurements[i] = 
             (sigio_signal_timestamp.tv_sec -
              start_timestamp.tv_sec) * 1000000 + 
             (sigio_signal_timestamp.tv_usec -
              start_timestamp.tv_usec);
+        */
         
     }  // End of for loop
     
@@ -293,6 +324,9 @@ main(void)
             average_latency, 
             std_deviation,
             NUM_MEASUREMENTS);
+
+
+    dump_stats();
 
     return 0;
 }
@@ -444,13 +478,15 @@ int gpio_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int
         
         /* Deassert output pin in the target port's DR register*/
         
-        reg_data &= ~ONE_BIT_MASK(pin_number);
+        //reg_data &= ~ONE_BIT_MASK(pin_number);
+        reg_data = 0;
         *address = reg_data;
     } else {
         
         /* Assert output pin in the target port's DR register*/
                 
-        reg_data |= ONE_BIT_MASK(pin_number);
+        //reg_data |= ONE_BIT_MASK(pin_number);
+        reg_data = 3;
         *address = reg_data;
     }
     
@@ -468,8 +504,85 @@ int gpio_set_pin(unsigned int target_addr, unsigned int pin_number, unsigned int
     
 }    
     
+/* -----------------------------------------------------------------------------
+ * read the capture counter
+ */
+void get_capture_counter()
+{
+    int fp = open("/dev/mem", O_RDWR|O_SYNC);
     
+    if(fp == -1)
+    {
+        printf("Unable to open /dev/mem.  Ensure it exists (major=1, minor=1)\n");
+        return;
+    }    
+
+    volatile unsigned int *capture_counter_base;
+    capture_counter_base = mmap(NULL, 
+                                4096, 
+                                PROT_READ | PROT_WRITE, 
+                                MAP_SHARED, 
+                                fp, 
+                                CAPTURE_TIMER);
+
+    if ( capture_counter_base == MAP_FAILED ){
+        fprintf(stderr, "mmap failed: %s\n", strerror(errno));
+        //handle_sigint(0); 
+    }
+    else {
+        DEBUG_PRINT("CAPTURE_COUNTER mmap successful\n");
+    }
+
+    capture_counter = *(capture_counter_base + (CPT_SLV2 >> 2));
+
+    int temp = close(fp);
+    if(temp == -1)
+    {
+        printf("Unable to close /dev/mem.  Ensure it exists (major=1, minor=1)\n");
+        return;
+    }    
+
+    munmap(NULL, MAP_SIZE);        
+    return;
+}
+
+void create_marks_csv( long unsigned a[],
+                            int end_id,
+                            int start_id,
+                            FILE* fp){
 
 
+    int i,j;
 
 
+    for(i=start_id;i<end_id;i++){
+        fprintf(fp,"\n%d, %lu",i+1, a[i-start_id]);
+
+    }
+}
+
+void dump_stats() {
+    char filename[32]; 
+
+    sprintf(filename, "%s_%d", 
+                        "interrupt_latency", 
+                        NUM_MEASUREMENTS); 
+
+    strcat(filename,".csv");
+
+    DEBUG_PRINT("\n Creating %s file",filename);
+
+    FILE* fp=fopen(filename,"w+");
+
+    fprintf(fp,"Id, Latency");
+
+    create_marks_csv( intr_latency_measurements,
+                            NUM_MEASUREMENTS,
+                            0,
+                            fp);
+
+    fclose(fp);
+
+    DEBUG_PRINT("\n %sfile created\n",filename);
+
+}

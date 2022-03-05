@@ -1,2 +1,2 @@
-kernel//home/ultra96/adv_mcu/lab2/kernel_module_working/gpio_int.ko
-kernel//home/ultra96/adv_mcu/lab2/kernel_module_working/cdma_int.ko
+kernel//home/ultra96/adv_mcu/lab2/kernel_module/gpio_int.ko
+kernel//home/ultra96/adv_mcu/lab2/kernel_module/cdma_int.ko
