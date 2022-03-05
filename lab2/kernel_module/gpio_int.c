@@ -67,7 +67,7 @@ static struct fasync_struct *fasync_gpio_queue ;
 
 irq_handler_t gpio_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 {
-    interruptcount++;
+  interruptcount++;
   
     #ifdef DEBUG
     printk(KERN_INFO "gpio_int: Interrupt detected in kernel \n");  // DEBUG
@@ -77,7 +77,7 @@ irq_handler_t gpio_int_handler(int irq, void *dev_id, struct pt_regs *regs)
   
     kill_fasync(&fasync_gpio_queue, SIGIO, POLL_IN);
 
-    return  (irq_handler_t) IRQ_HANDLED;
+return  (irq_handler_t) IRQ_HANDLED;
 
 }
 
@@ -103,7 +103,7 @@ ssize_t read_proc(struct file *filp,char *buf,size_t count,loff_t *offp )
     if(count==0) temp=len;
     printk("read_proc count value = %ld\n", count);
       
-    return count;
+return count;
 }
 
 
@@ -119,7 +119,7 @@ ssize_t write_proc(struct file *filp,const char *buf,size_t count,loff_t *offp)
 
     printk("write_proc count value = %ld\n", count);
 
-    return count;
+return count;
 }
 
 

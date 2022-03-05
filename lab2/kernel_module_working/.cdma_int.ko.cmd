@@ -1,1 +1,0 @@
-cmd_/home/ultra96/adv_mcu/lab2/kernel_module_working/cdma_int.ko := ld -EL -r  -maarch64linux -T ./scripts/module-common.lds --build-id  -o /home/ultra96/adv_mcu/lab2/kernel_module_working/cdma_int.ko /home/ultra96/adv_mcu/lab2/kernel_module_working/cdma_int.o /home/ultra96/adv_mcu/lab2/kernel_module_working/cdma_int.mod.o ;  true

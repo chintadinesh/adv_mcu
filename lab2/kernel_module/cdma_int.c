@@ -1,13 +1,12 @@
 /* ===================================================================
- *  cdma_interrupt.c
+ *  cdma-interrupt.c
  *
- *  //ORIGINAL AUTHOR:     Mark McDermott
- *  AUTHOR:     Dinesh
+ *  AUTHOR:     Mark McDermott
  *  CREATED:    March 12, 2009
  *  UPDATED:    May 2, 2017     Updated for ZED Board
  *  UPDATED:    Feb 5, 2021     Updated for the ULTRA96
  *
- *  DESCRIPTION: This kernel module registers interrupts from CDMA
+ *  DESCRIPTION: This kernel module registers interrupts from GPIO
  *               port and measures the time between them. This is
  *               used to also measure the latency through the kernel
  *               to respond to interrupts. 
@@ -43,8 +42,8 @@
 
 #define MODULE_VER "1.0"
 
-#define CDMA_MAJOR 245                  // Need to mknod /dev/cdma_int c 245 0
-#define MODULE_NM "cdma_int"
+#define GPIO_MAJOR 241                  // Need to mknod /dev/gpio_int c 240 0
+#define MODULE_NM "cdma_interrupt"
 
 #undef DEBUG
 #define DEBUG
@@ -64,12 +63,11 @@ static struct fasync_struct *fasync_cdma_queue ;
  * structure using do_gettimeofday.
  */
  
-//static irqreturn_t cdma_int_handler(int irq, void *dev_id, struct pt_regs
-//*regs){
+//static irqreturn_t cdma_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 
 irq_handler_t cdma_int_handler(int irq, void *dev_id, struct pt_regs *regs)
 {
-    interruptcount++;
+  interruptcount++;
   
     #ifdef DEBUG
     printk(KERN_INFO "cdma_int: Interrupt detected in kernel \n");  // DEBUG
@@ -79,7 +77,7 @@ irq_handler_t cdma_int_handler(int irq, void *dev_id, struct pt_regs *regs)
   
     kill_fasync(&fasync_cdma_queue, SIGIO, POLL_IN);
 
-    return  (irq_handler_t) IRQ_HANDLED;
+return  (irq_handler_t) IRQ_HANDLED;
 
 }
 
@@ -105,7 +103,7 @@ ssize_t read_proc(struct file *filp,char *buf,size_t count,loff_t *offp )
     if(count==0) temp=len;
     printk("read_proc count value = %ld\n", count);
       
-    return count;
+return count;
 }
 
 
@@ -121,7 +119,7 @@ ssize_t write_proc(struct file *filp,const char *buf,size_t count,loff_t *offp)
 
     printk("write_proc count value = %ld\n", count);
 
-    return count;
+return count;
 }
 
 
@@ -284,15 +282,15 @@ static int __init init_cdma_int(void)
    
     printk("ZED Interrupt Module\n");
     printk("ZED Interrupt Driver Loading.\n");
-    printk("Using Major Number %d on %s\n", CDMA_MAJOR, MODULE_NM); 
+    printk("Using Major Number %d on %s\n", GPIO_MAJOR, MODULE_NM); 
 
     err = platform_driver_register(&zynq_cdma_driver);
       
     if(err !=0) printk("Driver register error with number %d\n",err);       
     else        printk("Driver registered with no error\n");
     
-    if (register_chrdev(CDMA_MAJOR, MODULE_NM, &cdma_fops)) {
-        printk("cdma_int: unable to get major %d. ABORTING!\n", CDMA_MAJOR);
+    if (register_chrdev(GPIO_MAJOR, MODULE_NM, &cdma_fops)) {
+        printk("cdma_int: unable to get major %d. ABORTING!\n", GPIO_MAJOR);
     goto no_cdma_interrupt;
     }
 
@@ -310,8 +308,7 @@ static int __init init_cdma_int(void)
     rv = request_irq(gic_interrupt, 
                     (irq_handler_t) cdma_int_handler, 
                      IRQF_TRIGGER_RISING,
-                    "cdma_interrupt", 
-                    NULL);
+                    "cdma_interrupt", NULL);
   
     if ( rv ) {
        // printk("Can't get interrupt %d\n", INTERRUPT);
@@ -326,10 +323,9 @@ static int __init init_cdma_int(void)
     // remove the proc entry on error
     
 no_cdma_interrupt:
-    printk(KERN_INFO "No cmda found. Undoing stuff\n");
     free_irq(gic_interrupt,NULL);                   // Release IRQ    
-    unregister_chrdev(CDMA_MAJOR, MODULE_NM);       // Release character device
-    unregister_chrdev(CDMA_MAJOR, MODULE_NM);
+    unregister_chrdev(GPIO_MAJOR, MODULE_NM);       // Release character device
+    unregister_chrdev(GPIO_MAJOR, MODULE_NM);
     platform_driver_unregister(&zynq_cdma_driver);
     remove_proc_entry("cdma_interrupt", NULL);
     return -EBUSY;
@@ -346,7 +342,7 @@ static void __exit cleanup_cdma_interrupt(void)
 {
 
     free_irq(gic_interrupt,NULL);                   // Release IRQ    
-    unregister_chrdev(CDMA_MAJOR, MODULE_NM);       // Release character device
+    unregister_chrdev(GPIO_MAJOR, MODULE_NM);       // Release character device
     platform_driver_unregister(&zynq_cdma_driver);  // Unregister the driver
     remove_proc_entry("cdma_interrupt", NULL);      // Remove process entry
     kfree(msg);
@@ -365,8 +361,7 @@ static void __exit cleanup_cdma_interrupt(void)
 module_init(init_cdma_int);
 module_exit(cleanup_cdma_interrupt);
 
-//MODULE_AUTHOR("Mark McDermott");
-MODULE_AUTHOR("Dinesh");
+MODULE_AUTHOR("Mark McDermott");
 MODULE_DESCRIPTION("cdma_interrupt proc module");
 MODULE_LICENSE("GPL");
 

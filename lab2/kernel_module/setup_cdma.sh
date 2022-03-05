@@ -1,7 +1,7 @@
 #!/bin/sh
 
 rm /dev/cdma_int
-/bin/mknod /dev/cdma_int c 245 0
+/bin/mknod /dev/cdma_int c 241 0
 
 /sbin/rmmod cdma_int
 /sbin/insmod cdma_int.ko
@@ -11,7 +11,7 @@ rm /dev/cdma_int
 #sleep 1.0
 #/bin/pm 0x43c00000 0xaa > /dev/null
 #sleep 1.0
-#cat /proc/interrupts | grep cdma
+#cat /proc/interrupts | grep gpio
 
-#while (ls > /dev/null) do ./intr_latency.exe; cat /proc/interrupts | grep cdma; done
+#while (ls > /dev/null) do ./intr_latency.exe; cat /proc/interrupts | grep gpio; done
 

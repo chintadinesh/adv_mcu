@@ -1,1 +1,0 @@
-cmd_/h1kp/code/APIs/h1kp_dig_int/h1kp_dig_int.ko := arm-linux-gnueabihf-ld -EL -r  -T /usr/src/linux-3.10.17.1-wand-armhf.com/scripts/module-common.lds --build-id  -o /h1kp/code/APIs/h1kp_dig_int/h1kp_dig_int.ko /h1kp/code/APIs/h1kp_dig_int/h1kp_dig_int.o /h1kp/code/APIs/h1kp_dig_int/h1kp_dig_int.mod.o
