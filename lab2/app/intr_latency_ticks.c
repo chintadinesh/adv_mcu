@@ -572,7 +572,7 @@ void dump_stats() {
 
     DEBUG_PRINT("\n Creating %s file",filename);
 
-    FILE* fp=fopen(filename,"w+");
+    FILE* fp=fopen(filename,"a+");
 
     fprintf(fp,"Id, Latency");
 
