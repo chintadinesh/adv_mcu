@@ -1,16 +1,26 @@
-# please change to root user
+# please change to root user.
 ```
 ultra96@EE382N4:~$ sudo bash
 [sudo] password for ultra96:
-root@EE382N4:~#
 ```
-# step1: please extract the tar file
+# step1: please extract the tar file and load the bitstream.
 ```
 root@EE382N4:~# tar -xzf dc47444_lab2.tar.gz
 root@EE382N4:~# ls lab2_submission
 adv_mcu_lab2.pdf  capture_timer_verilog  kernel_module  tests
 app               fpga_files             plots
 root@EE382N4:~#
+root@EE382N4:~#
+root@EE382N4:~/lab2_submission# ls
+adv_mcu_lab2.pdf  capture_timer_verilog  kernel_module  Readme.md
+app               fpga_files             plots          tests
+root@EE382N4:~/lab2_submission# cd fpga_files/
+root@EE382N4:~/lab2_submission/fpga_files# ls
+system.dtb  system.dts  ultra96v2_oob_wrapper.bit
+pper.bit 2N4:~/lab2_submission/fpga_files# fpgautil -b ultra96v2_oob_wrap
+Time taken to load BIN is 3720.000000 Milli Seconds
+BIN FILE loaded through zynqMP FPGA manager successfully
+root@EE382N4:~/lab2_submission/fpga_files#
 ```
 # step2: chdir to kernel_modules directory and build
 ```
