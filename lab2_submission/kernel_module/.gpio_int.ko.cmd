@@ -1,0 +1,1 @@
+cmd_/home/ultra96/adv_mcu/lab2/kernel_module/gpio_int.ko := ld -EL -r  -maarch64linux -T ./scripts/module-common.lds --build-id  -o /home/ultra96/adv_mcu/lab2/kernel_module/gpio_int.ko /home/ultra96/adv_mcu/lab2/kernel_module/gpio_int.o /home/ultra96/adv_mcu/lab2/kernel_module/gpio_int.mod.o ;  true
