@@ -29,7 +29,7 @@ pm 0xfffc0000 0xabcdabcd
 echo "\n"
 
 pm 0xb0000018 0xfffc0000
-pm 0xb0000020 0xb0028000
+pm 0xb0000020 0xb0030000
 pm 0xb0000028 0x4
 
 echo "\n"
@@ -41,7 +41,7 @@ echo "disabling interrupts"
 pm 0xb0000000 0x0000
 
 echo "testing bram memory"
-dm 0xa0028000
+dm 0xb0020000
 
 echo "capture counter = "
 dm 0xa0030008

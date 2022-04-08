@@ -37,9 +37,9 @@
 #define CDMA                0xB0000000
 
 //#define BRAM                0x43C00000
-#define BRAM_DMA            0xB0028000
+#define BRAM_DMA            0xB0030000
 
-#define BRAM                0xA0028000
+#define BRAM                0xB0020000
 
 #define OCM                 0xFFFC0000
 #define OCM_BACK            0xFFFC2000
